@@ -1,11 +1,12 @@
 import React from 'react';
-import { Sparkles, BookOpen, LogIn, UserPlus, LogOut, Home } from 'lucide-react';
+import { Sparkles, BookOpen, LogIn, UserPlus, LogOut, Home, LayoutDashboard } from 'lucide-react';
 import { Button } from '../common/Button';
+import { ThemeToggle } from '../common/ThemeToggle';
 
 interface NavbarProps {
   currentView?: 'landing' | 'login' | 'signup' | 'dashboard';
-  onNavigate?: (view: 'landing' | 'login' | 'signup') => void;
-  user?: { displayName?: string | null; email?: string | null } | null;
+  onNavigate?: (view: 'landing' | 'login' | 'signup' | 'dashboard') => void;
+  user?: { displayName?: string | null; email?: string | null; photoURL?: string | null } | null;
   onLogout?: () => void;
 }
 
@@ -16,17 +17,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onLogout,
 }) => {
   return (
-    <header
-      style={{
-        position: 'sticky',
-        top: 0,
-        zIndex: 50,
-        borderBottom: '1px solid var(--border-subtle)',
-        background: 'rgba(10, 13, 20, 0.8)',
-        backdropFilter: 'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
-      }}
-    >
+    <header className="app-navbar">
       <div
         style={{
           maxWidth: '1280px',
@@ -39,7 +30,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         }}
       >
         <div
-          onClick={() => onNavigate && onNavigate('landing')}
+          onClick={() => onNavigate && onNavigate(user ? 'dashboard' : 'landing')}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -69,26 +60,50 @@ export const Navbar: React.FC<NavbarProps> = ({
           </span>
         </div>
 
-        <nav style={{ display: 'flex', alignItems: 'center', gap: '28px' }}>
-          {currentView !== 'landing' ? (
+        <nav style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+          <button
+            type="button"
+            onClick={() => onNavigate && onNavigate('landing')}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: currentView === 'landing' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '0.95rem',
+              fontWeight: currentView === 'landing' ? 700 : 500,
+              fontFamily: 'inherit',
+              transition: 'color var(--transition-fast)',
+            }}
+          >
+            <Home size={16} /> Home
+          </button>
+
+          {user && (
             <button
               type="button"
-              onClick={() => onNavigate && onNavigate('landing')}
+              onClick={() => onNavigate && onNavigate('dashboard')}
               style={{
                 background: 'none',
                 border: 'none',
-                color: 'var(--text-secondary)',
+                color: currentView === 'dashboard' ? 'var(--accent-primary)' : 'var(--text-secondary)',
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
                 fontSize: '0.95rem',
+                fontWeight: currentView === 'dashboard' ? 700 : 500,
                 fontFamily: 'inherit',
+                transition: 'color var(--transition-fast)',
               }}
             >
-              <Home size={16} /> Home
+              <LayoutDashboard size={16} /> Dashboard
             </button>
-          ) : (
+          )}
+
+          {!user && currentView === 'landing' && (
             <>
               <a
                 href="#features"
@@ -115,9 +130,24 @@ export const Navbar: React.FC<NavbarProps> = ({
         </nav>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <ThemeToggle />
           {user ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+              {user.photoURL ? (
+                <img
+                  src={user.photoURL}
+                  alt={user.displayName || 'User Avatar'}
+                  referrerPolicy="no-referrer"
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '50%',
+                    border: '2px solid rgba(99, 102, 241, 0.5)',
+                    objectFit: 'cover',
+                  }}
+                />
+              ) : null}
+              <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {user.displayName || user.email?.split('@')[0] || 'Student'}
               </span>
               <Button variant="secondary" size="sm" onClick={onLogout}>

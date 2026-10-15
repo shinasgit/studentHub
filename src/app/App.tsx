@@ -3,9 +3,10 @@ import { Navbar } from '../components/layout/Navbar';
 import { Footer } from '../components/layout/Footer';
 import { LandingPage } from '../features/landing/LandingPage';
 import { AuthPage } from '../features/auth/AuthPage';
+import { StudentDashboard } from '../features/dashboard/StudentDashboard';
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import { auth } from '../lib/firebase';
-import { BookOpen, CheckCircle2 } from 'lucide-react';
+import { Lock, LogIn } from 'lucide-react';
 import { Button } from '../components/common/Button';
 
 export const App: React.FC = () => {
@@ -40,7 +41,7 @@ export const App: React.FC = () => {
 
       <main style={{ flex: 1 }}>
         {currentView === 'landing' && (
-          <LandingPage onGetStarted={() => setCurrentView('signup')} />
+          <LandingPage onGetStarted={() => setCurrentView(currentUser ? 'dashboard' : 'signup')} />
         )}
 
         {(currentView === 'login' || currentView === 'signup') && (
@@ -52,55 +53,52 @@ export const App: React.FC = () => {
         )}
 
         {currentView === 'dashboard' && (
-          <div
-            style={{
-              maxWidth: '960px',
-              margin: '60px auto',
-              padding: '0 24px',
-              textAlign: 'center',
-            }}
-          >
-            <div className="glass-panel animate-fade-in" style={{ padding: '48px 32px' }}>
-              <div
-                style={{
-                  width: '64px',
-                  height: '64px',
-                  borderRadius: '20px',
-                  background: 'linear-gradient(135deg, #10b981, #06b6d4)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  margin: '0 auto 24px',
-                  boxShadow: '0 0 30px rgba(16, 185, 129, 0.4)',
-                }}
-              >
-                <CheckCircle2 size={32} color="#ffffff" />
-              </div>
+          currentUser ? (
+            <StudentDashboard user={currentUser} />
+          ) : (
+            <div
+              style={{
+                maxWidth: '520px',
+                margin: '80px auto',
+                padding: '0 24px',
+                textAlign: 'center',
+              }}
+            >
+              <div className="glass-panel animate-fade-in" style={{ padding: '48px 32px' }}>
+                <div
+                  style={{
+                    width: '64px',
+                    height: '64px',
+                    borderRadius: '20px',
+                    background: 'rgba(239, 68, 68, 0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto 20px',
+                    color: 'var(--accent-rose)',
+                  }}
+                >
+                  <Lock size={30} />
+                </div>
 
-              <h2 style={{ fontSize: '2.2rem', marginBottom: '12px' }}>
-                Welcome to your <span className="gradient-text">Student Dashboard</span>
-              </h2>
+                <h2 style={{ fontSize: '1.8rem', fontWeight: 800, marginBottom: '8px' }}>
+                  Sign In Required
+                </h2>
 
-              <p style={{ maxWidth: '520px', margin: '0 auto 28px', color: 'var(--text-secondary)' }}>
-                {currentUser?.email
-                  ? `Signed in as ${currentUser.email}. Your personalized subjects, flashcards, and notes are ready!`
-                  : 'Authentication successful! You are signed in and ready to learn.'}
-              </p>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '24px' }}>
+                  Please sign in to access your personal student workspace, course subjects, and study progress.
+                </p>
 
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '16px', flexWrap: 'wrap' }}>
-                <Button variant="primary" size="lg" onClick={() => setCurrentView('landing')}>
-                  <BookOpen size={18} /> View Course Materials
-                </Button>
-                <Button variant="secondary" size="lg" onClick={handleLogout}>
-                  Sign Out
+                <Button variant="primary" size="md" onClick={() => setCurrentView('login')}>
+                  <LogIn size={16} /> Sign In to Continue
                 </Button>
               </div>
             </div>
-          </div>
+          )
         )}
       </main>
 
-      {currentView === 'landing' && <Footer />}
+      {(currentView === 'landing' || currentView === 'dashboard') && <Footer />}
     </div>
   );
 };

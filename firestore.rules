@@ -1,0 +1,43 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Checks if the user is authenticated with Firebase Auth
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Checks if the current authenticated user matches the userId parameter
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Top-level users collection: each student has their isolated profile and subcollections
+    match /users/{userId} {
+      // Students can only read and write their own profile
+      allow read, write: if isOwner(userId);
+
+      // Subjects subcollection: users/{userId}/subjects/{subjectId}
+      match /subjects/{subjectId} {
+        // Enforce that only the authenticating owner can read, create, update, or delete subjects
+        allow read, write: if isOwner(userId);
+
+        // Modules subcollection: users/{userId}/subjects/{subjectId}/modules/{moduleId}
+        match /modules/{moduleId} {
+          allow read, write: if isOwner(userId);
+        }
+      }
+
+      // Restrict all other user-scoped collections (notes, quizzes, flashcards, resources, planner)
+      match /{allSubcollections=**} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // Default deny for all other paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

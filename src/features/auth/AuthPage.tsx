@@ -19,9 +19,8 @@ import {
   createUserWithEmailAndPassword,
   updateProfile,
   signInWithPopup,
-  GoogleAuthProvider,
 } from 'firebase/auth';
-import { auth } from '../../lib/firebase';
+import { auth, googleProvider, isFirebaseConfigured } from '../../lib/firebase';
 
 interface AuthPageProps {
   initialMode?: 'login' | 'signup';
@@ -81,8 +80,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({
       const error = err as { code?: string; message?: string };
       console.warn('Firebase auth attempt:', error);
 
-      // Handle friendly error messages
-      if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password') {
+      if (error.code === 'auth/operation-not-allowed') {
+        setErrorMsg('Email/Password sign-in is not enabled in Firebase Console. Go to Authentication > Sign-in method and enable "Email/Password".');
+      } else if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password') {
         setErrorMsg('Invalid email or password. Please verify and try again.');
       } else if (error.code === 'auth/email-already-in-use') {
         setErrorMsg('An account already exists with this email address.');
@@ -113,22 +113,40 @@ export const AuthPage: React.FC<AuthPageProps> = ({
     setSuccessMsg(null);
     setLoading(true);
 
-    try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-      setSuccessMsg('Signed in with Google successfully!');
+    if (!isFirebaseConfigured) {
+      setErrorMsg(
+        'Firebase keys not detected in .env! Follow the guide below to add your Firebase API keys. (Preview mode activated for UI testing)'
+      );
+      setSuccessMsg('Demo preview: Signed in with mock Google profile!');
+      setLoading(false);
       if (onSuccess) {
-        setTimeout(onSuccess, 1000);
+        setTimeout(onSuccess, 1200);
+      }
+      return;
+    }
+
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
+      setSuccessMsg(`Welcome, ${user.displayName || user.email || 'Student'}! Redirecting...`);
+      if (onSuccess) {
+        setTimeout(onSuccess, 900);
       }
     } catch (err: unknown) {
       const error = err as { code?: string; message?: string };
       console.warn('Google Auth notice:', error);
-      if (error.code?.includes('api-key-not-valid') || error.code?.includes('configuration-not-found')) {
-        setSuccessMsg('Demo mode: Google sign-in preview successful!');
-        if (onSuccess) {
-          setTimeout(onSuccess, 1200);
-        }
-      } else if (error.code !== 'auth/popup-closed-by-user') {
+
+      if (error.code === 'auth/popup-closed-by-user') {
+        setErrorMsg('Sign-in cancelled: The Google popup was closed before completing.');
+      } else if (error.code === 'auth/popup-blocked') {
+        setErrorMsg('Browser popup blocked. Please allow popups for localhost to sign in with Google.');
+      } else if (error.code === 'auth/unauthorized-domain') {
+        setErrorMsg('Unauthorized domain: Add localhost to Authorized Domains in Firebase Console > Authentication > Settings.');
+      } else if (error.code === 'auth/operation-not-allowed') {
+        setErrorMsg('Google Sign-In is not enabled yet in your Firebase Console. Go to Authentication > Sign-in method and enable Google.');
+      } else if (error.code?.includes('api-key-not-valid') || error.code?.includes('configuration-not-found')) {
+        setErrorMsg('Invalid Firebase configuration in .env. Please check your VITE_FIREBASE_API_KEY.');
+      } else {
         setErrorMsg(error.message || 'Google sign-in could not be completed.');
       }
     } finally {
@@ -359,7 +377,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             gap: '10px',
             padding: '9px 16px',
             borderRadius: 'var(--radius-md)',
-            background: 'rgba(255, 255, 255, 0.05)',
+            background: 'var(--social-btn-bg)',
             border: '1px solid var(--border-subtle)',
             color: 'var(--text-primary)',
             fontFamily: 'var(--font-sans)',
@@ -369,11 +387,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             transition: 'all var(--transition-normal)',
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
-            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+            e.currentTarget.style.background = 'var(--social-btn-hover)';
+            e.currentTarget.style.borderColor = 'var(--border-hover)';
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+            e.currentTarget.style.background = 'var(--social-btn-bg)';
             e.currentTarget.style.borderColor = 'var(--border-subtle)';
           }}
         >
@@ -397,6 +415,30 @@ export const AuthPage: React.FC<AuthPageProps> = ({
           </svg>
           Continue with Google
         </button>
+
+        {!isFirebaseConfigured && (
+          <div
+            style={{
+              marginTop: '14px',
+              padding: '10px 14px',
+              borderRadius: 'var(--radius-md)',
+              background: 'rgba(245, 158, 11, 0.1)',
+              border: '1px solid rgba(245, 158, 11, 0.25)',
+              color: '#fbbf24',
+              fontSize: '0.78rem',
+              lineHeight: '1.45',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '8px',
+              textAlign: 'left',
+            }}
+          >
+            <AlertCircle size={15} style={{ flexShrink: 0, marginTop: '2px' }} />
+            <span>
+              <strong>Setup Notice:</strong> Firebase credentials are in demo mode. Create a <code>.env</code> file with your Firebase config to enable real Google authentication.
+            </span>
+          </div>
+        )}
 
         {/* Toggle Footer text */}
         <div

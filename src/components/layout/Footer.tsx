@@ -6,7 +6,7 @@ export const Footer: React.FC = () => {
     <footer
       style={{
         borderTop: '1px solid var(--border-subtle)',
-        background: 'var(--bg-secondary)',
+        background: 'var(--footer-bg)',
         padding: '60px 24px 30px',
         marginTop: '80px',
       }}
