@@ -25,10 +25,11 @@ import type { Subject, SubjectInput } from '../../types/subject';
 
 interface StudentDashboardProps {
   user: User;
+  onSelectSubject?: (subject: Subject) => void;
   onExploreModules?: () => void;
 }
 
-export const StudentDashboard: React.FC<StudentDashboardProps> = ({ user }) => {
+export const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, onSelectSubject }) => {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -546,6 +547,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ user }) => {
               subject={subject}
               onEdit={handleOpenEdit}
               onDelete={handleOpenDelete}
+              onSelect={onSelectSubject}
             />
           ))}
         </div>

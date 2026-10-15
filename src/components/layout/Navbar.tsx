@@ -1,11 +1,11 @@
 import React from 'react';
-import { Sparkles, BookOpen, LogIn, UserPlus, LogOut, Home, LayoutDashboard } from 'lucide-react';
+import { Sparkles, BookOpen, LogIn, UserPlus, LogOut, Home, LayoutDashboard, FileText } from 'lucide-react';
 import { Button } from '../common/Button';
 import { ThemeToggle } from '../common/ThemeToggle';
 
 interface NavbarProps {
-  currentView?: 'landing' | 'login' | 'signup' | 'dashboard';
-  onNavigate?: (view: 'landing' | 'login' | 'signup' | 'dashboard') => void;
+  currentView?: 'landing' | 'login' | 'signup' | 'dashboard' | 'subject-detail' | 'resources';
+  onNavigate?: (view: 'landing' | 'login' | 'signup' | 'dashboard' | 'resources') => void;
   user?: { displayName?: string | null; email?: string | null; photoURL?: string | null } | null;
   onLogout?: () => void;
 }
@@ -60,7 +60,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </span>
         </div>
 
-        <nav style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+        <nav style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
           <button
             type="button"
             onClick={() => onNavigate && onNavigate('landing')}
@@ -82,25 +82,47 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
 
           {user && (
-            <button
-              type="button"
-              onClick={() => onNavigate && onNavigate('dashboard')}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: currentView === 'dashboard' ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                fontSize: '0.95rem',
-                fontWeight: currentView === 'dashboard' ? 700 : 500,
-                fontFamily: 'inherit',
-                transition: 'color var(--transition-fast)',
-              }}
-            >
-              <LayoutDashboard size={16} /> Dashboard
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => onNavigate && onNavigate('dashboard')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: (currentView === 'dashboard' || currentView === 'subject-detail') ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '0.95rem',
+                  fontWeight: (currentView === 'dashboard' || currentView === 'subject-detail') ? 700 : 500,
+                  fontFamily: 'inherit',
+                  transition: 'color var(--transition-fast)',
+                }}
+              >
+                <LayoutDashboard size={16} /> Dashboard
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onNavigate && onNavigate('resources')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: currentView === 'resources' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '0.95rem',
+                  fontWeight: currentView === 'resources' ? 700 : 500,
+                  fontFamily: 'inherit',
+                  transition: 'color var(--transition-fast)',
+                }}
+              >
+                <FileText size={16} /> Resources
+              </button>
+            </>
           )}
 
           {!user && currentView === 'landing' && (

@@ -6,13 +6,28 @@ interface SubjectCardProps {
   subject: Subject;
   onEdit: (subject: Subject) => void;
   onDelete: (subject: Subject) => void;
+  onSelect?: (subject: Subject) => void;
 }
 
-export const SubjectCard: React.FC<SubjectCardProps> = ({ subject, onEdit, onDelete }) => {
+export const SubjectCard: React.FC<SubjectCardProps> = ({
+  subject,
+  onEdit,
+  onDelete,
+  onSelect,
+}) => {
   const accentColor = subject.color || '#6366f1';
 
   return (
-    <div className="subject-card animate-fade-in" style={{ borderColor: 'var(--border-subtle)' }}>
+    <div
+      className="subject-card animate-fade-in"
+      style={{ borderColor: 'var(--border-subtle)', cursor: onSelect ? 'pointer' : 'default' }}
+      onClick={(e) => {
+        // If clicking on an action button, don't trigger onSelect
+        const target = e.target as HTMLElement;
+        if (target.closest('button') || target.closest('a')) return;
+        if (onSelect) onSelect(subject);
+      }}
+    >
       {/* Top accent color bar */}
       <div className="subject-card-stripe" style={{ background: accentColor }} />
 
@@ -178,12 +193,23 @@ export const SubjectCard: React.FC<SubjectCardProps> = ({ subject, onEdit, onDel
       >
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
           <BookOpen size={14} color={accentColor} />
-          <span>Active Course</span>
+          <span>Modules & Notes</span>
         </span>
 
-        <span style={{ fontSize: '0.75rem' }}>
-          Added {new Date(subject.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-        </span>
+        {onSelect && (
+          <span
+            style={{
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              color: accentColor,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+            }}
+          >
+            View Details →
+          </span>
+        )}
       </div>
     </div>
   );
