@@ -1,21 +1,40 @@
 import React from 'react';
-import { Sparkles, BookOpen, LogIn, UserPlus, LogOut, Home, LayoutDashboard, FileText } from 'lucide-react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { Sparkles, BookOpen, LogIn, UserPlus, LogOut, Home, LayoutDashboard, FileText, StickyNote, Calendar } from 'lucide-react';
 import { Button } from '../common/Button';
 import { ThemeToggle } from '../common/ThemeToggle';
 
 interface NavbarProps {
-  currentView?: 'landing' | 'login' | 'signup' | 'dashboard' | 'subject-detail' | 'resources';
-  onNavigate?: (view: 'landing' | 'login' | 'signup' | 'dashboard' | 'resources') => void;
+  currentView?: string;
+  onNavigate?: (view: string) => void;
   user?: { displayName?: string | null; email?: string | null; photoURL?: string | null } | null;
   onLogout?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
-  currentView = 'landing',
   onNavigate,
   user,
   onLogout,
 }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const handleNav = (path: string, viewName?: string) => {
+    if (onNavigate && viewName) {
+      onNavigate(viewName);
+    }
+    navigate(path);
+  };
+
+  const isHome = location.pathname === '/home' || location.pathname === '/';
+  const isDashboard = location.pathname === '/dashboard' || location.pathname.startsWith('/subjects');
+  const isResources = location.pathname === '/resources';
+  const isNotes = location.pathname === '/notes';
+  const isFlashcards = location.pathname === '/flashcards';
+  const isPlanner = location.pathname === '/planner';
+  const isLogin = location.pathname === '/login';
+  const isSignup = location.pathname === '/signup';
+
   return (
     <header className="app-navbar">
       <div
@@ -30,12 +49,12 @@ export const Navbar: React.FC<NavbarProps> = ({
         }}
       >
         <div
-          onClick={() => onNavigate && onNavigate(user ? 'dashboard' : 'landing')}
+          onClick={() => handleNav(user ? '/dashboard' : '/home', user ? 'dashboard' : 'landing')}
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '12px',
-            cursor: onNavigate ? 'pointer' : 'default',
+            cursor: 'pointer',
           }}
         >
           <div
@@ -63,17 +82,17 @@ export const Navbar: React.FC<NavbarProps> = ({
         <nav style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
           <button
             type="button"
-            onClick={() => onNavigate && onNavigate('landing')}
+            onClick={() => handleNav('/home', 'landing')}
             style={{
               background: 'none',
               border: 'none',
-              color: currentView === 'landing' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+              color: isHome ? 'var(--accent-primary)' : 'var(--text-secondary)',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
               fontSize: '0.95rem',
-              fontWeight: currentView === 'landing' ? 700 : 500,
+              fontWeight: isHome ? 700 : 500,
               fontFamily: 'inherit',
               transition: 'color var(--transition-fast)',
             }}
@@ -85,17 +104,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             <>
               <button
                 type="button"
-                onClick={() => onNavigate && onNavigate('dashboard')}
+                onClick={() => handleNav('/dashboard', 'dashboard')}
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: (currentView === 'dashboard' || currentView === 'subject-detail') ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                  color: isDashboard ? 'var(--accent-primary)' : 'var(--text-secondary)',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
                   fontSize: '0.95rem',
-                  fontWeight: (currentView === 'dashboard' || currentView === 'subject-detail') ? 700 : 500,
+                  fontWeight: isDashboard ? 700 : 500,
                   fontFamily: 'inherit',
                   transition: 'color var(--transition-fast)',
                 }}
@@ -105,27 +124,87 @@ export const Navbar: React.FC<NavbarProps> = ({
 
               <button
                 type="button"
-                onClick={() => onNavigate && onNavigate('resources')}
+                onClick={() => handleNav('/resources', 'resources')}
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: currentView === 'resources' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                  color: isResources ? 'var(--accent-primary)' : 'var(--text-secondary)',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
                   fontSize: '0.95rem',
-                  fontWeight: currentView === 'resources' ? 700 : 500,
+                  fontWeight: isResources ? 700 : 500,
                   fontFamily: 'inherit',
                   transition: 'color var(--transition-fast)',
                 }}
               >
                 <FileText size={16} /> Resources
               </button>
+
+              <button
+                type="button"
+                onClick={() => handleNav('/notes', 'notes')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: isNotes ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '0.95rem',
+                  fontWeight: isNotes ? 700 : 500,
+                  fontFamily: 'inherit',
+                  transition: 'color var(--transition-fast)',
+                }}
+              >
+                <StickyNote size={16} /> Notes
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleNav('/flashcards', 'flashcards')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: isFlashcards ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '0.95rem',
+                  fontWeight: isFlashcards ? 700 : 500,
+                  fontFamily: 'inherit',
+                  transition: 'color var(--transition-fast)',
+                }}
+              >
+                <Sparkles size={16} /> Flashcards
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleNav('/planner', 'planner')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: isPlanner ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '0.95rem',
+                  fontWeight: isPlanner ? 700 : 500,
+                  fontFamily: 'inherit',
+                  transition: 'color var(--transition-fast)',
+                }}
+              >
+                <Calendar size={16} /> Planner
+              </button>
             </>
           )}
 
-          {!user && currentView === 'landing' && (
+          {!user && isHome && (
             <>
               <a
                 href="#features"
@@ -179,16 +258,16 @@ export const Navbar: React.FC<NavbarProps> = ({
           ) : (
             <>
               <Button
-                variant={currentView === 'login' ? 'primary' : 'secondary'}
+                variant={isLogin ? 'primary' : 'secondary'}
                 size="sm"
-                onClick={() => onNavigate && onNavigate('login')}
+                onClick={() => handleNav('/login', 'login')}
               >
                 <LogIn size={14} /> Sign In
               </Button>
               <Button
-                variant={currentView === 'signup' ? 'primary' : 'primary'}
+                variant={isSignup ? 'primary' : 'primary'}
                 size="sm"
-                onClick={() => onNavigate && onNavigate('signup')}
+                onClick={() => handleNav('/signup', 'signup')}
               >
                 <UserPlus size={14} /> Get Started
               </Button>

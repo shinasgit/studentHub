@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Mail,
   Lock,
@@ -33,7 +34,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   onSuccess,
   onNavigateHome,
 }) => {
+  const navigate = useNavigate();
   const [mode, setMode] = useState<'login' | 'signup'>(initialMode);
+
+  useEffect(() => {
+    setMode(initialMode);
+  }, [initialMode]);
+
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -199,6 +206,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
               setMode('login');
               setErrorMsg(null);
               setSuccessMsg(null);
+              navigate('/login');
             }}
           >
             Sign In
@@ -210,6 +218,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
               setMode('signup');
               setErrorMsg(null);
               setSuccessMsg(null);
+              navigate('/signup');
             }}
           >
             Sign Up

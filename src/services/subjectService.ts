@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   addDoc,
   updateDoc,
@@ -160,3 +161,31 @@ export const deleteSubject = async (userId: string, subjectId: string): Promise<
   const subjectDocRef = doc(db, 'users', userId, 'subjects', subjectId);
   await deleteDoc(subjectDocRef);
 };
+
+/**
+ * Fetches a single subject by ID
+ */
+export const getSubjectById = async (userId: string, subjectId: string): Promise<Subject | null> => {
+  if (!userId || !subjectId) return null;
+  try {
+    const docRef = doc(db, 'users', userId, 'subjects', subjectId);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return null;
+    const data = snap.data();
+    return {
+      id: snap.id,
+      userId,
+      name: data.name || '',
+      code: data.code || '',
+      semester: data.semester || 'Semester 1',
+      description: data.description || '',
+      color: data.color || '#6366f1',
+      createdAt: formatTimestamp(data.createdAt),
+      updatedAt: formatTimestamp(data.updatedAt),
+    };
+  } catch (err) {
+    console.error('Error fetching subject by ID:', err);
+    return null;
+  }
+};
+

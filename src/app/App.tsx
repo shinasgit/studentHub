@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Routes, Route, Navigate, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { Navbar } from '../components/layout/Navbar';
 import { Footer } from '../components/layout/Footer';
 import { LandingPage } from '../features/landing/LandingPage';
@@ -6,20 +7,22 @@ import { AuthPage } from '../features/auth/AuthPage';
 import { StudentDashboard } from '../features/dashboard/StudentDashboard';
 import { SubjectDetailPage } from '../features/subjects/SubjectDetailPage';
 import { ResourceLibraryPage } from '../features/resources/ResourceLibraryPage';
+import { NotesPage } from '../features/notes/NotesPage';
+import { FlashcardsPage } from '../features/flashcards/FlashcardsPage';
+import { PlannerPage } from '../features/planner/PlannerPage';
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import { auth } from '../lib/firebase';
-import { getSubjects } from '../services/subjectService';
+import { getSubjects, getSubjectById } from '../services/subjectService';
 import type { Subject } from '../types/subject';
 import { Lock, LogIn } from 'lucide-react';
 import { Button } from '../components/common/Button';
 
-type ViewMode = 'landing' | 'login' | 'signup' | 'dashboard' | 'subject-detail' | 'resources';
-
 export const App: React.FC = () => {
-  const [currentView, setCurrentView] = useState<ViewMode>('landing');
+  const navigate = useNavigate();
+  const location = useLocation();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null);
 
   // Sync subjects list for global library and subject switcher
   const syncSubjects = useCallback(async (uid: string) => {
@@ -27,7 +30,7 @@ export const App: React.FC = () => {
       const data = await getSubjects(uid);
       setSubjects(data);
     } catch {
-      // Ignored or handled inside dashboard
+      // Handled inside components
     }
   }, []);
 
@@ -38,8 +41,8 @@ export const App: React.FC = () => {
         syncSubjects(user.uid);
       } else {
         setSubjects([]);
-        setSelectedSubject(null);
       }
+      setAuthLoading(false);
     });
     return () => unsubscribe();
   }, [syncSubjects]);
@@ -48,92 +51,245 @@ export const App: React.FC = () => {
     try {
       await signOut(auth);
       setCurrentUser(null);
-      setSelectedSubject(null);
-      setCurrentView('landing');
+      navigate('/home');
     } catch (err) {
       console.error('Logout error:', err);
     }
   };
 
-  const handleSelectSubject = (subj: Subject) => {
-    setSelectedSubject(subj);
-    setCurrentView('subject-detail');
-  };
+  const hideFooter = location.pathname === '/login' || location.pathname === '/signup';
+
+  if (authLoading) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
+          <div style={{ fontSize: '1.1rem', fontWeight: 600 }}>Loading StudentHub...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <Navbar
-        currentView={currentView}
-        onNavigate={(view) => {
-          if (view === 'dashboard' && currentUser) {
-            syncSubjects(currentUser.uid);
-          }
-          setCurrentView(view);
-        }}
         user={currentUser}
         onLogout={handleLogout}
       />
 
       <main style={{ flex: 1 }}>
-        {currentView === 'landing' && (
-          <LandingPage onGetStarted={() => setCurrentView(currentUser ? 'dashboard' : 'signup')} />
-        )}
+        <Routes>
+          {/* Landing / Home */}
+          <Route path="/" element={<LandingPage onGetStarted={() => navigate(currentUser ? '/dashboard' : '/signup')} />} />
+          <Route path="/home" element={<LandingPage onGetStarted={() => navigate(currentUser ? '/dashboard' : '/signup')} />} />
 
-        {(currentView === 'login' || currentView === 'signup') && (
-          <AuthPage
-            initialMode={currentView}
-            onSuccess={() => {
-              setCurrentView('dashboard');
-              if (auth.currentUser) syncSubjects(auth.currentUser.uid);
-            }}
-            onNavigateHome={() => setCurrentView('landing')}
+          {/* Authentication Routes */}
+          <Route
+            path="/login"
+            element={
+              currentUser ? (
+                <Navigate to="/dashboard" replace />
+              ) : (
+                <AuthPage
+                  initialMode="login"
+                  onSuccess={() => {
+                    navigate('/dashboard');
+                    if (auth.currentUser) syncSubjects(auth.currentUser.uid);
+                  }}
+                  onNavigateHome={() => navigate('/home')}
+                />
+              )
+            }
           />
-        )}
+          <Route
+            path="/signup"
+            element={
+              currentUser ? (
+                <Navigate to="/dashboard" replace />
+              ) : (
+                <AuthPage
+                  initialMode="signup"
+                  onSuccess={() => {
+                    navigate('/dashboard');
+                    if (auth.currentUser) syncSubjects(auth.currentUser.uid);
+                  }}
+                  onNavigateHome={() => navigate('/home')}
+                />
+              )
+            }
+          />
 
-        {/* Authenticated Dashboard */}
-        {currentView === 'dashboard' && (
-          currentUser ? (
-            <StudentDashboard
-              user={currentUser}
-              onSelectSubject={handleSelectSubject}
-            />
-          ) : (
-            <RequireAuthBanner onLogin={() => setCurrentView('login')} />
-          )
-        )}
+          {/* Authenticated Dashboard */}
+          <Route
+            path="/dashboard"
+            element={
+              currentUser ? (
+                <StudentDashboard
+                  user={currentUser}
+                  onSelectSubject={(subj) => navigate(`/subjects/${subj.id}`)}
+                />
+              ) : (
+                <RequireAuthBanner onLogin={() => navigate('/login')} />
+              )
+            }
+          />
 
-        {/* Subject Detail View (Modules & Subject Resources) */}
-        {currentView === 'subject-detail' && (
-          currentUser && selectedSubject ? (
-            <SubjectDetailPage
-              user={currentUser}
-              subject={selectedSubject}
-              subjects={subjects}
-              onBack={() => {
-                syncSubjects(currentUser.uid);
-                setCurrentView('dashboard');
-              }}
-            />
-          ) : (
-            <RequireAuthBanner onLogin={() => setCurrentView('login')} />
-          )
-        )}
+          {/* Subject Detail View (Modules & Subject Resources) */}
+          <Route
+            path="/subjects/:subjectId"
+            element={
+              <SubjectDetailRoute
+                user={currentUser}
+                subjects={subjects}
+                syncSubjects={syncSubjects}
+              />
+            }
+          />
 
-        {/* Global Study Resource Library */}
-        {currentView === 'resources' && (
-          currentUser ? (
-            <ResourceLibraryPage
-              user={currentUser}
-              subjects={subjects}
-            />
-          ) : (
-            <RequireAuthBanner onLogin={() => setCurrentView('login')} />
-          )
-        )}
+          {/* Global Study Resource Library */}
+          <Route
+            path="/resources"
+            element={
+              currentUser ? (
+                <ResourceLibraryPage
+                  user={currentUser}
+                  subjects={subjects}
+                />
+              ) : (
+                <RequireAuthBanner onLogin={() => navigate('/login')} />
+              )
+            }
+          />
+
+          {/* Personal Study Notes View */}
+          <Route
+            path="/notes"
+            element={
+              currentUser ? (
+                <NotesPage
+                  user={currentUser}
+                  subjects={subjects}
+                />
+              ) : (
+                <RequireAuthBanner onLogin={() => navigate('/login')} />
+              )
+            }
+          />
+
+          {/* Flashcards View */}
+          <Route
+            path="/flashcards"
+            element={
+              currentUser ? (
+                <FlashcardsPage
+                  user={currentUser}
+                  subjects={subjects}
+                />
+              ) : (
+                <RequireAuthBanner onLogin={() => navigate('/login')} />
+              )
+            }
+          />
+
+          {/* Study Planner View */}
+          <Route
+            path="/planner"
+            element={
+              currentUser ? (
+                <PlannerPage
+                  user={currentUser}
+                  subjects={subjects}
+                />
+              ) : (
+                <RequireAuthBanner onLogin={() => navigate('/login')} />
+              )
+            }
+          />
+
+          {/* Fallback to dashboard or home */}
+          <Route path="*" element={<Navigate to={currentUser ? '/dashboard' : '/home'} replace />} />
+        </Routes>
       </main>
 
-      {(currentView === 'landing' || currentView === 'dashboard' || currentView === 'resources') && <Footer />}
+      {!hideFooter && <Footer />}
     </div>
+  );
+};
+
+const SubjectDetailRoute: React.FC<{
+  user: User | null;
+  subjects: Subject[];
+  syncSubjects: (uid: string) => void;
+}> = ({ user, subjects, syncSubjects }) => {
+  const { subjectId } = useParams<{ subjectId: string }>();
+  const navigate = useNavigate();
+  const [subject, setSubject] = useState<Subject | null>(() => {
+    return subjects.find((s) => s.id === subjectId) || null;
+  });
+  const [loading, setLoading] = useState<boolean>(!subject);
+
+  useEffect(() => {
+    if (subjects.length > 0 && subjectId) {
+      const found = subjects.find((s) => s.id === subjectId);
+      if (found) {
+        setSubject(found);
+        setLoading(false);
+        return;
+      }
+    }
+
+    if (user && subjectId) {
+      setLoading(true);
+      getSubjectById(user.uid, subjectId)
+        .then((res) => {
+          setSubject(res);
+        })
+        .catch((err) => {
+          console.error('Failed to load subject by id:', err);
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+    }
+  }, [user, subjectId, subjects]);
+
+  if (!user) {
+    return <RequireAuthBanner onLogin={() => navigate('/login')} />;
+  }
+
+  if (loading) {
+    return (
+      <div style={{ textAlign: 'center', padding: '100px 20px', color: 'var(--text-secondary)' }}>
+        <p>Loading course modules and resources...</p>
+      </div>
+    );
+  }
+
+  if (!subject) {
+    return (
+      <div style={{ maxWidth: '520px', margin: '80px auto', padding: '0 24px', textAlign: 'center' }}>
+        <div className="glass-panel" style={{ padding: '40px 24px' }}>
+          <h2 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '12px' }}>Subject Not Found</h2>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>
+            We could not find this subject. It may have been removed or the link is invalid.
+          </p>
+          <Button variant="primary" size="md" onClick={() => navigate('/dashboard')}>
+            Back to Dashboard
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <SubjectDetailPage
+      user={user}
+      subject={subject}
+      subjects={subjects}
+      onBack={() => {
+        syncSubjects(user.uid);
+        navigate('/dashboard');
+      }}
+    />
   );
 };
 

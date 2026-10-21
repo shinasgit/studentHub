@@ -29,7 +29,27 @@ service cloud.firestore {
         }
       }
 
-      // Restrict all other user-scoped collections (notes, quizzes, flashcards, resources, planner)
+      // Personal Notes subcollection: users/{userId}/notes/{noteId}
+      match /notes/{noteId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Flashcards subcollection: users/{userId}/flashcards/{flashcardId}
+      match /flashcards/{flashcardId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Study Planner Sessions subcollection: users/{userId}/studySessions/{sessionId}
+      match /studySessions/{sessionId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Resources subcollection: users/{userId}/resources/{resourceId}
+      match /resources/{resourceId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Restrict all other user-scoped subcollections
       match /{allSubcollections=**} {
         allow read, write: if isOwner(userId);
       }
