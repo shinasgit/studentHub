@@ -15,6 +15,8 @@ export interface StudyResource {
   type: ResourceType;
   url: string;
   description?: string;
+  fileSize?: string | null;
+  fileStorageKey?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -26,6 +28,8 @@ export interface ResourceInput {
   type: ResourceType;
   url: string;
   description?: string;
+  fileSize?: string | null;
+  fileStorageKey?: string | null;
 }
 
 export const RESOURCE_TYPE_LABELS: Record<ResourceType, { label: string; badgeColor: string }> = {

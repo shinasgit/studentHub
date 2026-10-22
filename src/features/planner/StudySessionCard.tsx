@@ -9,6 +9,7 @@ import {
   BookOpen,
   Layers,
   RotateCcw,
+  Eye,
 } from 'lucide-react';
 import type { StudySession, StudySessionStatus } from '../../types/planner';
 import type { Subject } from '../../types/subject';
@@ -19,6 +20,7 @@ interface StudySessionCardProps {
   subject?: Subject;
   module?: Module;
   onStatusChange: (session: StudySession, status: StudySessionStatus) => void;
+  onView?: (session: StudySession) => void;
   onEdit: (session: StudySession) => void;
   onDelete: (session: StudySession) => void;
 }
@@ -51,6 +53,7 @@ export const StudySessionCard: React.FC<StudySessionCardProps> = ({
   subject,
   module,
   onStatusChange,
+  onView,
   onEdit,
   onDelete,
 }) => {
@@ -67,11 +70,6 @@ export const StudySessionCard: React.FC<StudySessionCardProps> = ({
         display: 'flex',
         flexDirection: 'column',
         gap: '12px',
-        borderLeft: isCompleted
-          ? '4px solid var(--accent-emerald)'
-          : isCancelled
-          ? '4px solid var(--text-muted)'
-          : `4px solid ${subjectColor}`,
         background: isCompleted ? 'rgba(16, 185, 129, 0.04)' : undefined,
         opacity: isCancelled ? 0.75 : 1,
         transition: 'all var(--transition-fast)',
@@ -182,13 +180,16 @@ export const StudySessionCard: React.FC<StudySessionCardProps> = ({
       {/* Title & Notes */}
       <div>
         <h3
+          onClick={() => onView && onView(session)}
           style={{
             fontSize: '1.05rem',
             fontWeight: 700,
             color: 'var(--text-primary)',
             marginBottom: '4px',
             textDecoration: isCancelled ? 'line-through' : 'none',
+            cursor: onView ? 'pointer' : 'default',
           }}
+          title={onView ? 'Click to view session details' : undefined}
         >
           {session.title}
         </h3>
@@ -323,6 +324,33 @@ export const StudySessionCard: React.FC<StudySessionCardProps> = ({
           )}
 
           <div style={{ width: '1px', height: '16px', background: 'var(--border-subtle)' }} />
+
+          {/* View Details */}
+          {onView && (
+            <button
+              type="button"
+              onClick={() => onView(session)}
+              title="View Session Details"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                padding: '6px',
+                borderRadius: 'var(--radius-sm)',
+                display: 'flex',
+                alignItems: 'center',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = 'var(--accent-primary)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = 'var(--text-muted)';
+              }}
+            >
+              <Eye size={14} />
+            </button>
+          )}
 
           {/* Edit */}
           <button

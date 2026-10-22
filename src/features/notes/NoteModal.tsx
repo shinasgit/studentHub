@@ -43,6 +43,18 @@ const NoteModalForm: React.FC<{
   const [subjectId, setSubjectId] = useState<string>(
     initialData?.subjectId || defaultSubjectId || (subjects[0]?.id || '')
   );
+
+  // Sync subjectId if subjects arrive or change
+  useEffect(() => {
+    if ((!subjectId || !subjects.some((s) => s.id === subjectId)) && subjects.length > 0) {
+      setSubjectId(
+        defaultSubjectId && subjects.some((s) => s.id === defaultSubjectId)
+          ? defaultSubjectId
+          : subjects[0].id
+      );
+    }
+  }, [subjects, subjectId, defaultSubjectId]);
+
   const [moduleId, setModuleId] = useState<string>(
     initialData?.moduleId || defaultModuleId || ''
   );
@@ -310,5 +322,5 @@ const NoteModalForm: React.FC<{
 
 export const NoteModal: React.FC<NoteModalProps> = (props) => {
   if (!props.isOpen) return null;
-  return <NoteModalForm key={props.initialData?.id || 'new-note'} {...props} />;
+  return <NoteModalForm key={props.initialData?.id || `new-note-${props.subjects.map((s) => s.id).join('-')}`} {...props} />;
 };

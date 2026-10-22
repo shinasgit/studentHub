@@ -56,6 +56,8 @@ export const getResources = async (
         type: data.type || 'external-link',
         url: data.url || '',
         description: data.description || '',
+        fileSize: data.fileSize || null,
+        fileStorageKey: data.fileStorageKey || null,
         createdAt: formatTimestamp(data.createdAt),
         updatedAt: formatTimestamp(data.updatedAt),
       };
@@ -79,6 +81,8 @@ export const getResources = async (
           type: data.type || 'external-link',
           url: data.url || '',
           description: data.description || '',
+          fileSize: data.fileSize || null,
+          fileStorageKey: data.fileStorageKey || null,
           createdAt: formatTimestamp(data.createdAt),
           updatedAt: formatTimestamp(data.updatedAt),
         };
@@ -109,6 +113,8 @@ export const createResource = async (
     type: input.type,
     url: input.url.trim(),
     description: (input.description || '').trim(),
+    fileSize: input.fileSize || null,
+    fileStorageKey: input.fileStorageKey || null,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -122,6 +128,8 @@ export const createResource = async (
     type: input.type,
     url: input.url.trim(),
     description: (input.description || '').trim(),
+    fileSize: input.fileSize || null,
+    fileStorageKey: input.fileStorageKey || null,
     createdAt: now,
     updatedAt: now,
   };
@@ -143,6 +151,8 @@ export const updateResource = async (
   if (input.subjectId !== undefined) payload.subjectId = input.subjectId;
   if (input.moduleId !== undefined) payload.moduleId = input.moduleId;
   if (input.description !== undefined) payload.description = input.description.trim();
+  if (input.fileSize !== undefined) payload.fileSize = input.fileSize;
+  if (input.fileStorageKey !== undefined) payload.fileStorageKey = input.fileStorageKey;
 
   await updateDoc(resourceDocRef, payload);
 };

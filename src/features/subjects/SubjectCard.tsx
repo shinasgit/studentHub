@@ -28,9 +28,6 @@ export const SubjectCard: React.FC<SubjectCardProps> = ({
         if (onSelect) onSelect(subject);
       }}
     >
-      {/* Top accent color bar */}
-      <div className="subject-card-stripe" style={{ background: accentColor }} />
-
       <div>
         {/* Top Badges & Actions */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>

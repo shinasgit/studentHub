@@ -14,6 +14,7 @@ interface StudySessionModalProps {
   subjects: Subject[];
   defaultSubjectId?: string;
   defaultModuleId?: string;
+  defaultDate?: string;
   onClose: () => void;
   onSubmit: (input: StudySessionInput) => Promise<void>;
 }
@@ -33,6 +34,7 @@ const StudySessionModalForm: React.FC<{
   subjects: Subject[];
   defaultSubjectId?: string;
   defaultModuleId?: string;
+  defaultDate?: string;
   onClose: () => void;
   onSubmit: (input: StudySessionInput) => Promise<void>;
 }> = ({
@@ -42,6 +44,7 @@ const StudySessionModalForm: React.FC<{
   subjects,
   defaultSubjectId,
   defaultModuleId,
+  defaultDate,
   onClose,
   onSubmit,
 }) => {
@@ -52,10 +55,22 @@ const StudySessionModalForm: React.FC<{
   const [subjectId, setSubjectId] = useState<string>(
     initialData?.subjectId || defaultSubjectId || (subjects[0]?.id || '')
   );
+
+  // Sync subjectId if subjects arrive or change
+  useEffect(() => {
+    if ((!subjectId || !subjects.some((s) => s.id === subjectId)) && subjects.length > 0) {
+      setSubjectId(
+        defaultSubjectId && subjects.some((s) => s.id === defaultSubjectId)
+          ? defaultSubjectId
+          : subjects[0].id
+      );
+    }
+  }, [subjects, subjectId, defaultSubjectId]);
+
   const [moduleId, setModuleId] = useState<string>(
     initialData?.moduleId || defaultModuleId || ''
   );
-  const [date, setDate] = useState(initialData?.date || todayStr);
+  const [date, setDate] = useState(initialData?.date || defaultDate || todayStr);
   const [startTime, setStartTime] = useState(initialData?.startTime || defaultTime);
   const [durationMinutes, setDurationMinutes] = useState<number>(initialData?.durationMinutes || 45);
   const [description, setDescription] = useState(initialData?.description || '');
@@ -405,5 +420,5 @@ const StudySessionModalForm: React.FC<{
 
 export const StudySessionModal: React.FC<StudySessionModalProps> = (props) => {
   if (!props.isOpen) return null;
-  return <StudySessionModalForm key={props.initialData?.id || 'new-session'} {...props} />;
+  return <StudySessionModalForm key={props.initialData?.id || `new-session-${props.defaultDate || ''}-${props.subjects.map((s) => s.id).join('-')}`} {...props} />;
 };

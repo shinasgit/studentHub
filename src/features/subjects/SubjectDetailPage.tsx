@@ -1,22 +1,23 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { User } from 'firebase/auth';
 import {
   ArrowLeft,
   Layers,
   FileText,
   Plus,
-  BookOpen,
   Calendar,
   Hash,
   AlertCircle,
   CheckCircle2,
   Sparkles,
+  MessageSquare,
+  GraduationCap,
 } from 'lucide-react';
 import { Button } from '../../components/common/Button';
 import { ModuleList } from '../modules/ModuleList';
 import { ModuleModal } from '../modules/ModuleModal';
-import { ResourceCard } from '../resources/ResourceCard';
-import { ResourceModal } from '../resources/ResourceModal';
+import { ModuleMaterialsModal } from '../modules/ModuleMaterialsModal';
 import { PDFReaderModal } from '../reader/PDFReaderModal';
 import { TopicResearchModal } from '../research/TopicResearchModal';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
@@ -27,31 +28,30 @@ import {
   updateModule,
   deleteModule,
   toggleModuleCompletion,
+  addModuleLink,
 } from '../../services/moduleService';
 import {
   getResources,
   createResource,
-  updateResource,
   deleteResource,
 } from '../../services/resourceService';
 import type { Subject } from '../../types/subject';
-import type { Module, ModuleInput } from '../../types/module';
+import type { Module, ModuleInput, ModuleAttachment } from '../../types/module';
 import type { StudyResource, ResourceInput } from '../../types/resource';
 
 interface SubjectDetailPageProps {
   user: User;
   subject: Subject;
-  subjects: Subject[];
+  subjects?: Subject[];
   onBack: () => void;
 }
 
 export const SubjectDetailPage: React.FC<SubjectDetailPageProps> = ({
   user,
   subject,
-  subjects,
   onBack,
 }) => {
-  const [activeTab, setActiveTab] = useState<'modules' | 'resources'>('modules');
+  const navigate = useNavigate();
   const [modules, setModules] = useState<Module[]>([]);
   const [resources, setResources] = useState<StudyResource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,11 +62,7 @@ export const SubjectDetailPage: React.FC<SubjectDetailPageProps> = ({
   const [isModuleModalOpen, setIsModuleModalOpen] = useState(false);
   const [moduleModalMode, setModuleModalMode] = useState<'create' | 'edit'>('create');
   const [editingModule, setEditingModule] = useState<Module | null>(null);
-
-  // Resource modal states
-  const [isResModalOpen, setIsResModalOpen] = useState(false);
-  const [resModalMode, setResModalMode] = useState<'create' | 'edit'>('create');
-  const [editingResource, setEditingResource] = useState<StudyResource | null>(null);
+  const [activeMaterialsModule, setActiveMaterialsModule] = useState<Module | null>(null);
 
   // Delete modal state
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'module' | 'resource'; id: string; name: string } | null>(null);
@@ -236,39 +232,33 @@ export const SubjectDetailPage: React.FC<SubjectDetailPageProps> = ({
     }
   };
 
+  const handleOpenAttachmentPdf = async (att: ModuleAttachment, mod: Module) => {
+    let urlToUse = att.url;
+    if (att.storageKey) {
+      const freshUrl = await getFileObjectUrl(att.storageKey);
+      if (freshUrl) urlToUse = freshUrl;
+    }
+
+    setActivePdfResource({
+      id: att.id,
+      userId: user.uid,
+      subjectId: subject.id,
+      moduleId: mod.id,
+      title: att.name,
+      type: 'pdf',
+      url: urlToUse,
+      createdAt: att.uploadedAt,
+      updatedAt: att.uploadedAt,
+      fileStorageKey: att.storageKey,
+      fileSize: att.size,
+    });
+  };
+
   // --- Resource Actions ---
-  const handleOpenAddResource = () => {
-    setResModalMode('create');
-    setEditingResource(null);
-    setIsResModalOpen(true);
-  };
-
-  const handleOpenEditResource = (res: StudyResource) => {
-    setResModalMode('edit');
-    setEditingResource(res);
-    setIsResModalOpen(true);
-  };
-
   const handleResourceSubmit = async (input: ResourceInput) => {
-    if (resModalMode === 'create') {
-      const newRes = await createResource(user.uid, input);
-      setResources((prev) => [newRes, ...prev]);
-      setToastMsg(`Resource "${newRes.title}" added!`);
-    } else if (editingResource) {
-      await updateResource(user.uid, editingResource.id, input);
-      setResources((prev) =>
-        prev.map((r) => (r.id === editingResource.id ? { ...r, ...input } : r))
-      );
-      setToastMsg('Resource updated!');
-    }
-  };
-
-  const handleOpenResource = (res: StudyResource) => {
-    if (res.type === 'pdf' || res.url.endsWith('.pdf')) {
-      setActivePdfResource(res);
-    } else {
-      window.open(res.url, '_blank', 'noopener,noreferrer');
-    }
+    const newRes = await createResource(user.uid, input);
+    setResources((prev) => [newRes, ...prev]);
+    setToastMsg(`Resource "${newRes.title}" added!`);
   };
 
   // --- Delete Handling ---
@@ -290,7 +280,7 @@ export const SubjectDetailPage: React.FC<SubjectDetailPageProps> = ({
   const accentColor = subject.color || '#6366f1';
 
   return (
-    <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '32px 24px 80px' }}>
+    <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '24px clamp(14px, 4vw, 24px) 64px' }}>
       {/* Toast Feedback */}
       {toastMsg && (
         <div
@@ -310,9 +300,10 @@ export const SubjectDetailPage: React.FC<SubjectDetailPageProps> = ({
             gap: '10px',
             fontSize: '0.9rem',
             animation: 'fadeInSlideUp 0.3s ease-out forwards',
+            maxWidth: 'calc(100vw - 32px)',
           }}
         >
-          <CheckCircle2 size={18} color="var(--accent-emerald)" />
+          <CheckCircle2 size={18} color="var(--accent-emerald)" style={{ flexShrink: 0 }} />
           <span>{toastMsg}</span>
         </div>
       )}
@@ -346,167 +337,188 @@ export const SubjectDetailPage: React.FC<SubjectDetailPageProps> = ({
         <span>Back to Dashboard</span>
       </button>
 
-      {/* Subject Header Card */}
+      {/* Subject Header Card (Minimized & Compact) */}
       <div
         className="glass-panel animate-fade-in"
         style={{
-          padding: '32px',
-          marginBottom: '32px',
-          position: 'relative',
-          overflow: 'hidden',
-          borderTop: `4px solid ${accentColor}`,
+          padding: '12px 16px',
+          marginBottom: '20px',
+          borderRadius: 'var(--radius-lg)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
         }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '20px' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  padding: '3px 10px',
-                  borderRadius: 'var(--radius-sm)',
-                  fontSize: '0.8rem',
-                  fontWeight: 700,
-                  background: `${accentColor}20`,
-                  color: accentColor,
-                  border: `1px solid ${accentColor}40`,
-                }}
-              >
-                <Hash size={13} />
-                {subject.code}
-              </span>
+        {/* Top row: tags, title, and quick action buttons */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '10px',
+          }}
+        >
+          {/* Left: Tags + Subject Name */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', minWidth: 0, flex: '1 1 auto' }}>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '3px',
+                padding: '2px 7px',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                background: `${accentColor}18`,
+                color: accentColor,
+                border: `1px solid ${accentColor}35`,
+                letterSpacing: '0.02em',
+                flexShrink: 0,
+              }}
+            >
+              <Hash size={11} />
+              {subject.code}
+            </span>
 
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  padding: '3px 10px',
-                  borderRadius: 'var(--radius-sm)',
-                  fontSize: '0.78rem',
-                  fontWeight: 600,
-                  background: 'var(--social-btn-bg)',
-                  color: 'var(--text-secondary)',
-                  border: '1px solid var(--border-subtle)',
-                }}
-              >
-                <Calendar size={13} />
-                {subject.semester}
-              </span>
-            </div>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '3px',
+                padding: '2px 7px',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                background: 'var(--social-btn-bg)',
+                color: 'var(--text-secondary)',
+                border: '1px solid var(--border-subtle)',
+                flexShrink: 0,
+              }}
+            >
+              <Calendar size={11} />
+              {subject.semester}
+            </span>
 
-            <h1 style={{ fontSize: 'clamp(1.6rem, 3.5vw, 2.2rem)', fontWeight: 800, marginBottom: '8px' }}>
+            <h1
+              style={{
+                fontSize: 'clamp(1.05rem, 2.5vw, 1.25rem)',
+                fontWeight: 700,
+                color: 'var(--text-primary)',
+                margin: 0,
+                lineHeight: 1.3,
+                wordBreak: 'break-word',
+              }}
+            >
               {subject.name}
             </h1>
+          </div>
 
+          {/* Right: Quick Study Tools and Chatbot Actions */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+            <Button
+              variant="secondary"
+              size="sm"
+              type="button"
+              onClick={() => navigate(`/study-tools?subject=${subject.id}`)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '5px 10px',
+                fontSize: '0.78rem',
+              }}
+            >
+              <GraduationCap size={13} color="var(--accent-primary)" />
+              <span>Study Tools</span>
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              type="button"
+              onClick={() => navigate(`/chatbot?subjectId=${subject.id}`)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '5px 10px',
+                fontSize: '0.78rem',
+              }}
+            >
+              <MessageSquare size={13} color="var(--accent-primary)" />
+              <span>Study with Chatbot</span>
+            </Button>
+          </div>
+        </div>
+
+        {/* Bottom row: Compact stats badges & slim progress bar */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '8px',
+            fontSize: '0.76rem',
+            color: 'var(--text-secondary)',
+            paddingTop: '6px',
+            borderTop: '1px solid var(--border-subtle)',
+          }}
+        >
+          {/* Metadata counts */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <Layers size={12} color="var(--accent-primary)" />
+              <strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{modules.length}</strong> {modules.length === 1 ? 'module' : 'modules'}
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <FileText size={12} color="#ef4444" />
+              <strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                {modules.reduce((sum, m) => sum + (m.attachments?.length || (m.fileName ? 1 : 0)), 0)}
+              </strong> attached PDFs
+            </span>
             {subject.description && (
-              <p style={{ maxWidth: '640px', color: 'var(--text-secondary)', fontSize: '0.92rem', lineHeight: 1.5 }}>
-                {subject.description}
-              </p>
+              <span
+                style={{
+                  color: 'var(--text-muted)',
+                  maxWidth: '340px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+                title={subject.description}
+              >
+                • {subject.description}
+              </span>
             )}
           </div>
 
-          {/* Progress Tracker Card */}
-          <div
-            style={{
-              padding: '16px 20px',
-              borderRadius: 'var(--radius-md)',
-              background: 'var(--social-btn-bg)',
-              border: '1px solid var(--border-subtle)',
-              minWidth: '220px',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-              <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                Syllabus Progress
-              </span>
-              <span style={{ fontSize: '0.88rem', fontWeight: 800, color: accentColor }}>
-                {progressPercent}%
-              </span>
-            </div>
-
-            {/* Visual Progress Bar */}
+          {/* Inline compact progress */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Progress:</span>
             <div
               style={{
-                width: '100%',
-                height: '8px',
-                borderRadius: '4px',
+                width: '72px',
+                height: '5px',
+                borderRadius: '3px',
                 background: 'var(--border-subtle)',
                 overflow: 'hidden',
-                margin: '8px 0',
               }}
             >
               <div
                 style={{
                   width: `${progressPercent}%`,
                   height: '100%',
-                  background: `linear-gradient(90deg, ${accentColor}, #10b981)`,
-                  transition: 'width 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
+                  background: accentColor,
+                  transition: 'width 0.3s ease',
                 }}
               />
             </div>
-
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              {modules.filter((m) => m.completed).length} of {modules.length} modules completed
-            </div>
+            <span style={{ fontWeight: 700, color: accentColor, minWidth: '26px' }}>{progressPercent}%</span>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+              ({modules.filter((m) => m.completed).length}/{modules.length})
+            </span>
           </div>
-        </div>
-
-        {/* Tab Switcher */}
-        <div
-          style={{
-            display: 'flex',
-            gap: '8px',
-            marginTop: '28px',
-            paddingTop: '20px',
-            borderTop: '1px solid var(--border-subtle)',
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setActiveTab('modules')}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '8px 16px',
-              borderRadius: 'var(--radius-md)',
-              background: activeTab === 'modules' ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
-              color: activeTab === 'modules' ? 'var(--accent-primary)' : 'var(--text-secondary)',
-              border: activeTab === 'modules' ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid transparent',
-              fontWeight: 600,
-              fontSize: '0.9rem',
-              cursor: 'pointer',
-              transition: 'all var(--transition-fast)',
-            }}
-          >
-            <Layers size={16} />
-            <span>Modules & Chapters ({modules.length})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('resources')}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '8px 16px',
-              borderRadius: 'var(--radius-md)',
-              background: activeTab === 'resources' ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
-              color: activeTab === 'resources' ? 'var(--accent-primary)' : 'var(--text-secondary)',
-              border: activeTab === 'resources' ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid transparent',
-              fontWeight: 600,
-              fontSize: '0.9rem',
-              cursor: 'pointer',
-              transition: 'all var(--transition-fast)',
-            }}
-          >
-            <FileText size={16} />
-            <span>Study Resources ({resources.length})</span>
-          </button>
         </div>
       </div>
 
@@ -518,134 +530,56 @@ export const SubjectDetailPage: React.FC<SubjectDetailPageProps> = ({
         </div>
       )}
 
-      {/* Main Tab Content */}
-      {activeTab === 'modules' ? (
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <div>
-              <h2 style={{ fontSize: '1.3rem', fontWeight: 800 }}>Course Breakdown</h2>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                Track chapter completion and order units to align with your syllabus
-              </p>
-            </div>
-
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setIsResearchModalOpen(true)}
-                title="Research topics using free open educational sources"
-              >
-                <Sparkles size={15} color="var(--accent-emerald)" />
-                <span>Research Topic</span>
-              </Button>
-
-              <Button variant="primary" size="sm" onClick={handleOpenAddModule}>
-                <Plus size={16} />
-                <span>Add Module</span>
-              </Button>
-            </div>
+      {/* Main Course Modules & Breakdown */}
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+          <div>
+            <h2 style={{ fontSize: '1.3rem', fontWeight: 800 }}>Course Modules & Syllabus</h2>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+              Manage chapters, upload multiple lecture PDFs, and save external web resources directly inside each module.
+            </p>
           </div>
 
-          {loading ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div className="skeleton-card" style={{ height: '70px' }} />
-              <div className="skeleton-card" style={{ height: '70px' }} />
-              <div className="skeleton-card" style={{ height: '70px' }} />
-            </div>
-          ) : (
-            <ModuleList
-              modules={modules}
-              onToggleComplete={handleToggleComplete}
-              onEdit={handleOpenEditModule}
-              onDelete={(mod) => setDeleteTarget({ type: 'module', id: mod.id, name: mod.title })}
-              onMoveUp={handleMoveUp}
-              onMoveDown={handleMoveDown}
-              onAddModule={handleOpenAddModule}
-              onOpenFile={handleOpenModuleFile}
-            />
-          )}
-        </div>
-      ) : (
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <div>
-              <h2 style={{ fontSize: '1.3rem', fontWeight: 800 }}>Subject Materials</h2>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                PDF slides, question papers, and lecture resources for this course
-              </p>
-            </div>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setIsResearchModalOpen(true)}
+              title="Research topics using free open educational sources"
+            >
+              <Sparkles size={15} color="var(--accent-emerald)" />
+              <span>Research Topic</span>
+            </Button>
 
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setIsResearchModalOpen(true)}
-                title="Research topics using free open educational sources"
-              >
-                <Sparkles size={15} color="var(--accent-emerald)" />
-                <span>Research Topic</span>
-              </Button>
-
-              <Button variant="primary" size="sm" onClick={handleOpenAddResource}>
-                <Plus size={16} />
-                <span>Add Resource</span>
-              </Button>
-            </div>
+            <Button variant="primary" size="sm" onClick={handleOpenAddModule}>
+              <Plus size={16} />
+              <span>Add Module</span>
+            </Button>
           </div>
-
-          {loading ? (
-            <div className="subject-grid">
-              <div className="skeleton-card" />
-              <div className="skeleton-card" />
-            </div>
-          ) : resources.length === 0 ? (
-            <div className="empty-state animate-fade-in" style={{ padding: '48px 24px' }}>
-              <div
-                style={{
-                  width: '56px',
-                  height: '56px',
-                  borderRadius: '16px',
-                  background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(244, 63, 94, 0.15))',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  marginBottom: '16px',
-                  color: 'var(--accent-rose)',
-                }}
-              >
-                <BookOpen size={28} />
-              </div>
-              <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '6px' }}>
-                No resources added yet
-              </h3>
-              <p style={{ maxWidth: '400px', color: 'var(--text-secondary)', fontSize: '0.88rem', marginBottom: '20px' }}>
-                Add lecture slides, previous year question papers, or PDF notes to this subject.
-              </p>
-              <Button variant="primary" size="md" onClick={handleOpenAddResource}>
-                <Plus size={16} /> Add First Resource
-              </Button>
-            </div>
-          ) : (
-            <div className="subject-grid">
-              {resources.map((res) => {
-                const assignedModule = modules.find((m) => m.id === res.moduleId);
-                return (
-                  <ResourceCard
-                    key={res.id}
-                    resource={res}
-                    subject={subject}
-                    module={assignedModule}
-                    onOpen={handleOpenResource}
-                    onEdit={handleOpenEditResource}
-                    onDelete={(r) => setDeleteTarget({ type: 'resource', id: r.id, name: r.title })}
-                  />
-                );
-              })}
-            </div>
-          )}
         </div>
-      )}
+
+        {loading ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div className="skeleton-card" style={{ height: '70px' }} />
+            <div className="skeleton-card" style={{ height: '70px' }} />
+            <div className="skeleton-card" style={{ height: '70px' }} />
+          </div>
+        ) : (
+          <ModuleList
+            modules={modules}
+            resources={resources}
+            onToggleComplete={handleToggleComplete}
+            onEdit={handleOpenEditModule}
+            onDelete={(mod) => setDeleteTarget({ type: 'module', id: mod.id, name: mod.title })}
+            onMoveUp={handleMoveUp}
+            onMoveDown={handleMoveDown}
+            onAddModule={handleOpenAddModule}
+            onOpenMaterials={(mod) => setActiveMaterialsModule(mod)}
+            onOpenFile={handleOpenModuleFile}
+            onOpenPdf={handleOpenAttachmentPdf}
+          />
+        )}
+      </div>
 
       {/* Module Modal */}
       <ModuleModal
@@ -657,17 +591,22 @@ export const SubjectDetailPage: React.FC<SubjectDetailPageProps> = ({
         onSubmit={handleModuleSubmit}
       />
 
-      {/* Resource Modal */}
-      <ResourceModal
-        isOpen={isResModalOpen}
-        mode={resModalMode}
-        initialData={editingResource}
-        subjects={subjects}
-        modules={modules}
-        defaultSubjectId={subject.id}
-        onClose={() => setIsResModalOpen(false)}
-        onSubmit={handleResourceSubmit}
+      {/* Module Learning Materials & Multiple PDF Uploads Modal */}
+      <ModuleMaterialsModal
+        isOpen={Boolean(activeMaterialsModule)}
+        module={activeMaterialsModule}
+        subject={subject}
+        userId={user.uid}
+        moduleResources={resources.filter((r) => r.moduleId === activeMaterialsModule?.id)}
+        availableModules={modules}
+        onClose={() => setActiveMaterialsModule(null)}
+        onModuleUpdated={(updated) => {
+          setActiveMaterialsModule(updated);
+          setModules((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+        }}
+        onOpenPdf={(res) => setActivePdfResource(res)}
       />
+
 
       {/* Delete Confirmation Modal */}
       <DeleteConfirmModal
@@ -685,6 +624,20 @@ export const SubjectDetailPage: React.FC<SubjectDetailPageProps> = ({
         onClose={() => setIsResearchModalOpen(false)}
         onSaveResource={async (resInput) => {
           await handleResourceSubmit(resInput);
+          if (resInput.moduleId) {
+            try {
+              const updatedLinks = await addModuleLink(user.uid, subject.id, resInput.moduleId, {
+                title: resInput.title,
+                url: resInput.url,
+                description: resInput.description,
+              });
+              setModules((prev) =>
+                prev.map((m) => (m.id === resInput.moduleId ? { ...m, links: updatedLinks } : m))
+              );
+            } catch (err) {
+              console.warn(err);
+            }
+          }
           setToastMsg(`Saved "${resInput.title}" to resources!`);
         }}
       />

@@ -11,7 +11,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { Button } from '../../components/common/Button';
-import { searchEducationalTopic, type ResearchResult } from '../../services/researchService';
+import { searchEducationalTopic, type ResearchResult, decodeHtmlEntities } from '../../services/researchService';
 import type { Subject } from '../../types/subject';
 import type { Module } from '../../types/module';
 import type { ResourceInput } from '../../types/resource';
@@ -71,7 +71,7 @@ export const TopicResearchModal: React.FC<TopicResearchModalProps> = ({
       await onSaveResource({
         subjectId: subject.id,
         moduleId: selectedModuleId || undefined,
-        title: item.title,
+        title: decodeHtmlEntities(item.title),
         type: 'external-link',
         url: item.url,
         description: item.summary,
@@ -296,10 +296,6 @@ export const TopicResearchModal: React.FC<TopicResearchModalProps> = ({
                       display: 'flex',
                       flexDirection: 'column',
                       gap: '8px',
-                      borderLeft:
-                        res.source === 'Wikipedia'
-                          ? '3px solid var(--accent-primary)'
-                          : '3px solid var(--accent-emerald)',
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>

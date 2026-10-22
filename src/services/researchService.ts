@@ -27,6 +27,19 @@ const enforceRateLimit = async () => {
   lastRequestTime = Date.now();
 };
 
+export const decodeHtmlEntities = (text: string): string => {
+  if (!text) return '';
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&#x2F;/g, '/');
+};
+
 /**
  * Search Wikipedia open knowledge articles via Wikimedia REST & Action API
  * Attribution: Text available under Creative Commons Attribution-ShareAlike 4.0 License.
@@ -55,16 +68,14 @@ export const searchWikipedia = async (topic: string): Promise<ResearchResult[]> 
     const results: ResearchResult[] = [];
 
     for (const item of searchItems) {
-      // Strip HTML tags from Wikipedia snippet
-      const cleanSnippet = (item.snippet || '')
-        .replace(/<\/?[^>]+(>|$)/g, '')
-        .replace(/&quot;/g, '"')
-        .replace(/&#039;/g, "'")
-        .replace(/&amp;/g, '&');
+      // Strip HTML tags and entities from Wikipedia snippet
+      const cleanSnippet = decodeHtmlEntities(
+        (item.snippet || '').replace(/<\/?[^>]+(>|$)/g, '')
+      );
 
       results.push({
         id: `wiki-${item.pageid}`,
-        title: item.title,
+        title: decodeHtmlEntities(item.title),
         source: 'Wikipedia',
         summary: cleanSnippet ? `${cleanSnippet}...` : 'No preview available.',
         url: `https://en.wikipedia.org/wiki/${encodeURIComponent(item.title.replace(/ /g, '_'))}`,
@@ -109,11 +120,14 @@ export const searchCrossref = async (topic: string): Promise<ResearchResult[]> =
         author?: { given?: string; family?: string }[];
         created?: { 'date-time'?: string };
       }, index: number) => {
-        const titleStr = item.title?.[0] || 'Academic Article';
-        const cleanAbstract = (item.abstract || '')
-          .replace(/<[^>]+>/g, '')
-          .replace(/\s+/g, ' ')
-          .trim();
+        const rawTitle = item.title?.[0] || 'Academic Article';
+        const titleStr = decodeHtmlEntities(rawTitle);
+        const cleanAbstract = decodeHtmlEntities(
+          (item.abstract || '')
+            .replace(/<[^>]+>/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+        );
 
         const authorsList = (item.author || [])
           .map((a) => [a.given, a.family].filter(Boolean).join(' '))

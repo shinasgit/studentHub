@@ -21,6 +21,7 @@ const ModuleModalForm: React.FC<{
   onSubmit: (input: ModuleInput) => Promise<void>;
 }> = ({ mode, initialData, defaultOrder = 1, onClose, onSubmit }) => {
   const [title, setTitle] = useState(initialData?.title || '');
+  const [description, setDescription] = useState(initialData?.description || '');
   const [order, setOrder] = useState<number>(initialData?.order ?? defaultOrder);
   const [completed, setCompleted] = useState<boolean>(initialData?.completed || false);
   const [fileName, setFileName] = useState<string | null>(initialData?.fileName || null);
@@ -88,6 +89,7 @@ const ModuleModalForm: React.FC<{
     try {
       await onSubmit({
         title: cleanTitle,
+        description: description.trim(),
         order: Number(order) || 1,
         completed,
         fileName,
@@ -194,6 +196,21 @@ const ModuleModalForm: React.FC<{
               style={{ paddingLeft: '14px' }}
               required
               autoFocus
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="moduleDescription">
+              Module Description / Learning Goals (Optional)
+            </label>
+            <textarea
+              id="moduleDescription"
+              rows={2}
+              placeholder="e.g. Fundamental linear data structures, algorithm complexity, and problem sets"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="input-field"
+              style={{ padding: '10px 14px', resize: 'vertical' }}
             />
           </div>
 

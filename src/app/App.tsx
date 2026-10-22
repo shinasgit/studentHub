@@ -5,11 +5,12 @@ import { Footer } from '../components/layout/Footer';
 import { LandingPage } from '../features/landing/LandingPage';
 import { AuthPage } from '../features/auth/AuthPage';
 import { StudentDashboard } from '../features/dashboard/StudentDashboard';
+import { SubjectsPage } from '../features/subjects/SubjectsPage';
 import { SubjectDetailPage } from '../features/subjects/SubjectDetailPage';
-import { ResourceLibraryPage } from '../features/resources/ResourceLibraryPage';
 import { NotesPage } from '../features/notes/NotesPage';
-import { FlashcardsPage } from '../features/flashcards/FlashcardsPage';
+import { StudyToolsPage } from '../features/studyTools/StudyToolsPage';
 import { PlannerPage } from '../features/planner/PlannerPage';
+import { ChatbotPage } from '../features/chatbot/ChatbotPage';
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import { getSubjects, getSubjectById } from '../services/subjectService';
@@ -118,7 +119,7 @@ export const App: React.FC = () => {
             }
           />
 
-          {/* Authenticated Dashboard */}
+          {/* Authenticated Dashboard & Subjects */}
           <Route
             path="/dashboard"
             element={
@@ -126,6 +127,21 @@ export const App: React.FC = () => {
                 <StudentDashboard
                   user={currentUser}
                   onSelectSubject={(subj) => navigate(`/subjects/${subj.id}`)}
+                  onSubjectsChange={(updated) => setSubjects(updated)}
+                />
+              ) : (
+                <RequireAuthBanner onLogin={() => navigate('/login')} />
+              )
+            }
+          />
+          <Route
+            path="/subjects"
+            element={
+              currentUser ? (
+                <SubjectsPage
+                  user={currentUser}
+                  onSelectSubject={(subj) => navigate(`/subjects/${subj.id}`)}
+                  onSubjectsChange={(updated) => setSubjects(updated)}
                 />
               ) : (
                 <RequireAuthBanner onLogin={() => navigate('/login')} />
@@ -145,12 +161,15 @@ export const App: React.FC = () => {
             }
           />
 
-          {/* Global Study Resource Library */}
+          {/* Legacy resource library redirects to subjects */}
+          <Route path="/resources" element={<Navigate to="/subjects" replace />} />
+
+          {/* Chatbot & Study Scope Session */}
           <Route
-            path="/resources"
+            path="/chatbot"
             element={
               currentUser ? (
-                <ResourceLibraryPage
+                <ChatbotPage
                   user={currentUser}
                   subjects={subjects}
                 />
@@ -159,8 +178,9 @@ export const App: React.FC = () => {
               )
             }
           />
+          <Route path="/chat" element={<Navigate to="/chatbot" replace />} />
 
-          {/* Personal Study Notes View */}
+          {/* Personal Study Notes View (Preserved) */}
           <Route
             path="/notes"
             element={
@@ -175,12 +195,12 @@ export const App: React.FC = () => {
             }
           />
 
-          {/* Flashcards View */}
+          {/* Unified Study Tools View */}
           <Route
-            path="/flashcards"
+            path="/study-tools"
             element={
               currentUser ? (
-                <FlashcardsPage
+                <StudyToolsPage
                   user={currentUser}
                   subjects={subjects}
                 />
@@ -189,6 +209,9 @@ export const App: React.FC = () => {
               )
             }
           />
+
+          {/* Flashcards backward compatibility redirect */}
+          <Route path="/flashcards" element={<Navigate to="/study-tools" replace />} />
 
           {/* Study Planner View */}
           <Route

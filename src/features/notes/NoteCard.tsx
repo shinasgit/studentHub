@@ -40,7 +40,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
         cursor: 'default',
         padding: '20px 22px',
         gap: '14px',
-        borderTop: `4px solid ${subjectColor}`,
         minHeight: '200px',
       }}
     >

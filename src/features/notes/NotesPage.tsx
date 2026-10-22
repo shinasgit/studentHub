@@ -13,6 +13,7 @@ import { NoteModal } from './NoteModal';
 import { NoteViewModal } from './NoteViewModal';
 import { DeleteConfirmModal } from '../subjects/DeleteConfirmModal';
 import { getNotes, createNote, updateNote, deleteNote } from '../../services/noteService';
+import { getSubjects } from '../../services/subjectService';
 import type { Note, NoteInput } from '../../types/note';
 import type { Subject } from '../../types/subject';
 
@@ -22,10 +23,25 @@ interface NotesPageProps {
 }
 
 export const NotesPage: React.FC<NotesPageProps> = ({ user, subjects }) => {
+  const [activeSubjects, setActiveSubjects] = useState<Subject[]>(subjects);
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setActiveSubjects(subjects);
+  }, [subjects]);
+
+  useEffect(() => {
+    if (activeSubjects.length === 0) {
+      getSubjects(user.uid)
+        .then((data) => {
+          if (data && data.length > 0) setActiveSubjects(data);
+        })
+        .catch(console.error);
+    }
+  }, [user.uid, activeSubjects.length]);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -137,7 +153,7 @@ export const NotesPage: React.FC<NotesPageProps> = ({ user, subjects }) => {
   }, [notes]);
 
   return (
-    <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '36px 24px 80px' }}>
+    <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px clamp(14px, 4vw, 24px) 64px' }}>
       {/* Toast Notification */}
       {toastMsg && (
         <div
@@ -151,105 +167,45 @@ export const NotesPage: React.FC<NotesPageProps> = ({ user, subjects }) => {
             padding: '12px 20px',
             borderRadius: 'var(--radius-md)',
             boxShadow: 'var(--shadow-lg)',
-            border: '1px solid var(--accent-emerald)',
+            border: '1px solid var(--border-medium)',
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            animation: 'fadeIn 0.2s ease',
+            animation: 'fadeInSlideUp 0.2s ease-out',
+            maxWidth: 'calc(100vw - 32px)',
           }}
         >
-          <StickyNote size={18} color="var(--accent-emerald)" />
+          <StickyNote size={18} color="var(--accent-emerald)" style={{ flexShrink: 0 }} />
           <span style={{ fontSize: '0.88rem', fontWeight: 600 }}>{toastMsg}</span>
         </div>
       )}
 
-      {/* Header Banner */}
+      {/* Page Header */}
       <div
-        className="glass-panel animate-fade-in"
         style={{
-          padding: '32px 36px',
-          marginBottom: '32px',
-          position: 'relative',
-          overflow: 'hidden',
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: '16px',
+          marginBottom: '24px',
+          flexWrap: 'wrap',
         }}
       >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '24px',
-            flexWrap: 'wrap',
-          }}
-        >
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-              <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: 'var(--accent-emerald)', borderColor: 'rgba(16, 185, 129, 0.3)' }}>
-                <StickyNote size={12} /> Stage 5.1
-              </span>
-              <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                Personal Study Workspace
-              </span>
-            </div>
-
-            <h1 style={{ fontSize: '2.1rem', fontWeight: 800, letterSpacing: '-0.02em', marginBottom: '8px' }}>
-              Personal Study <span className="gradient-text">Notes</span>
-            </h1>
-
-            <p style={{ maxWidth: '620px', color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.6 }}>
-              Capture lecture summaries, key formulas, revision memos, and chapter takeaways across all your subjects.
-            </p>
-          </div>
-
-          <Button
-            variant="primary"
-            size="lg"
-            onClick={handleOpenCreate}
-            disabled={subjects.length === 0}
-            title={subjects.length === 0 ? 'Create a subject first in your Dashboard' : 'Create a new personal note'}
-          >
-            <Plus size={18} />
-            <span>Create New Note</span>
-          </Button>
+        <div>
+          <h1 style={{ fontSize: '1.375rem', fontWeight: 700, marginBottom: '2px' }}>Personal Notes</h1>
+          <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+            {notes.length} note{notes.length !== 1 ? 's' : ''} · {subjectsWithNotesCount} subject{subjectsWithNotesCount !== 1 ? 's' : ''}
+          </p>
         </div>
-
-        {/* Quick Stats Bar */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '24px',
-            marginTop: '24px',
-            paddingTop: '20px',
-            borderTop: '1px solid var(--border-subtle)',
-            flexWrap: 'wrap',
-          }}
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={handleOpenCreate}
+          disabled={subjects.length === 0}
+          title={subjects.length === 0 ? 'Create a subject first in your Dashboard' : 'Create a new note'}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--accent-primary)' }}>
-              {notes.length}
-            </span>
-            <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Total Notes</span>
-          </div>
-
-          <div style={{ width: '1px', height: '18px', background: 'var(--border-subtle)' }} />
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--accent-emerald)' }}>
-              {subjectsWithNotesCount}
-            </span>
-            <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Covered Subjects</span>
-          </div>
-
-          <div style={{ width: '1px', height: '18px', background: 'var(--border-subtle)' }} />
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-              {filteredNotes.length}
-            </span>
-            <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Visible</span>
-          </div>
-        </div>
+          <Plus size={15} /> New Note
+        </Button>
       </div>
 
       {/* Error Alert */}
@@ -308,7 +264,7 @@ export const NotesPage: React.FC<NotesPageProps> = ({ user, subjects }) => {
             style={{ minWidth: '180px', padding: '8px 12px' }}
           >
             <option value="all">All Subjects ({notes.length})</option>
-            {subjects.map((s) => {
+            {activeSubjects.map((s) => {
               const count = notes.filter((n) => n.subjectId === s.id).length;
               return (
                 <option key={s.id} value={s.id}>
@@ -463,7 +419,7 @@ export const NotesPage: React.FC<NotesPageProps> = ({ user, subjects }) => {
         /* Notes Grid */
         <div className="subject-grid">
           {filteredNotes.map((n) => {
-            const subject = subjects.find((s) => s.id === n.subjectId);
+            const subject = activeSubjects.find((s) => s.id === n.subjectId);
             return (
               <NoteCard
                 key={n.id}
@@ -484,7 +440,7 @@ export const NotesPage: React.FC<NotesPageProps> = ({ user, subjects }) => {
         mode={modalMode}
         initialData={editingNote}
         userId={user.uid}
-        subjects={subjects}
+        subjects={activeSubjects}
         defaultSubjectId={selectedSubjectId !== 'all' ? selectedSubjectId : undefined}
         onClose={() => setIsModalOpen(false)}
         onSubmit={handleSubmitNote}
@@ -494,7 +450,7 @@ export const NotesPage: React.FC<NotesPageProps> = ({ user, subjects }) => {
       <NoteViewModal
         isOpen={Boolean(viewingNote)}
         note={viewingNote}
-        subject={subjects.find((s) => s.id === viewingNote?.subjectId)}
+        subject={activeSubjects.find((s) => s.id === viewingNote?.subjectId)}
         onClose={() => setViewingNote(null)}
         onEdit={(note) => handleOpenEdit(note)}
       />

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   FileText,
@@ -11,6 +11,7 @@ import {
   Download,
 } from 'lucide-react';
 import type { StudyResource } from '../../types/resource';
+import { getFileObjectUrl } from '../../services/fileStorageService';
 
 interface PDFReaderModalProps {
   isOpen: boolean;
@@ -26,6 +27,29 @@ export const PDFReaderModal: React.FC<PDFReaderModalProps> = ({
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [iframeLoaded, setIframeLoaded] = useState(false);
+  const [activeUrl, setActiveUrl] = useState<string>(resource?.url || '');
+
+  useEffect(() => {
+    let isCancelled = false;
+    const resolveUrl = async () => {
+      if (resource?.fileStorageKey) {
+        const freshUrl = await getFileObjectUrl(resource.fileStorageKey);
+        if (freshUrl && !isCancelled) {
+          setActiveUrl(freshUrl);
+          return;
+        }
+      }
+      if (resource?.url && !isCancelled) {
+        setActiveUrl(resource.url);
+      }
+    };
+    if (resource) {
+      resolveUrl();
+    }
+    return () => {
+      isCancelled = true;
+    };
+  }, [resource]);
 
   if (!isOpen || !resource) return null;
 
@@ -38,13 +62,14 @@ export const PDFReaderModal: React.FC<PDFReaderModalProps> = ({
   };
 
   // Construct viewer URL
-  // If URL has # params, append or use standard fit options
-  const viewerUrl = resource.url.includes('#')
-    ? resource.url
-    : `${resource.url}#view=FitH&toolbar=1&navpanes=1`;
+  const currentUrl = activeUrl || resource.url;
+  const viewerUrl = currentUrl.includes('#')
+    ? currentUrl
+    : `${currentUrl}#view=FitH&toolbar=1&navpanes=1`;
 
   return (
     <div
+      className="pdf-reader-overlay"
       style={{
         position: 'fixed',
         inset: 0,
@@ -60,6 +85,7 @@ export const PDFReaderModal: React.FC<PDFReaderModalProps> = ({
       }}
     >
       <div
+        className="pdf-reader-modal"
         style={{
           width: isFullscreen ? '100vw' : '94vw',
           maxWidth: isFullscreen ? '100vw' : '1400px',
@@ -75,6 +101,7 @@ export const PDFReaderModal: React.FC<PDFReaderModalProps> = ({
       >
         {/* Top Control Bar */}
         <div
+          className="pdf-reader-header"
           style={{
             height: '60px',
             padding: '0 20px',
@@ -83,12 +110,12 @@ export const PDFReaderModal: React.FC<PDFReaderModalProps> = ({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            gap: '16px',
+            gap: '12px',
             flexShrink: 0,
           }}
         >
           {/* Title & Badge */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
             <div
               style={{
                 width: '32px',
@@ -104,7 +131,7 @@ export const PDFReaderModal: React.FC<PDFReaderModalProps> = ({
               <FileText size={18} color="#ef4444" />
             </div>
 
-            <div style={{ minWidth: 0 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
               <h3
                 style={{
                   fontSize: '0.98rem',
@@ -112,19 +139,19 @@ export const PDFReaderModal: React.FC<PDFReaderModalProps> = ({
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
-                  maxWidth: '380px',
+                  maxWidth: '100%',
                 }}
               >
                 {resource.title}
               </h3>
-              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+              <span className="pdf-reader-subtitle" style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                 AI Student Hub Built-in Reader
               </span>
             </div>
           </div>
 
           {/* Zoom and Navigation Controls */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
             <div
               style={{
                 display: 'flex',
@@ -148,12 +175,16 @@ export const PDFReaderModal: React.FC<PDFReaderModalProps> = ({
                   padding: '5px 8px',
                   display: 'flex',
                   alignItems: 'center',
+                  minWidth: '28px',
+                  minHeight: '28px',
+                  justifyContent: 'center',
                 }}
               >
                 <ZoomOut size={15} />
               </button>
 
               <span
+                className="pdf-zoom-level"
                 style={{
                   fontSize: '0.78rem',
                   fontWeight: 600,
@@ -179,6 +210,9 @@ export const PDFReaderModal: React.FC<PDFReaderModalProps> = ({
                   padding: '5px 8px',
                   display: 'flex',
                   alignItems: 'center',
+                  minWidth: '28px',
+                  minHeight: '28px',
+                  justifyContent: 'center',
                 }}
               >
                 <ZoomIn size={15} />
@@ -186,6 +220,7 @@ export const PDFReaderModal: React.FC<PDFReaderModalProps> = ({
 
               <button
                 type="button"
+                className="pdf-reset-zoom-btn"
                 onClick={handleResetZoom}
                 aria-label="Reset zoom"
                 title="Reset to 100%"
@@ -205,7 +240,7 @@ export const PDFReaderModal: React.FC<PDFReaderModalProps> = ({
 
             {/* Open External / Download */}
             <a
-              href={resource.url}
+              href={currentUrl}
               target="_blank"
               rel="noopener noreferrer"
               aria-label="Open in new window"
@@ -214,7 +249,7 @@ export const PDFReaderModal: React.FC<PDFReaderModalProps> = ({
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '6px',
-                padding: '6px 12px',
+                padding: '6px 10px',
                 borderRadius: 'var(--radius-sm)',
                 background: 'var(--social-btn-bg)',
                 border: '1px solid var(--border-subtle)',
@@ -230,7 +265,7 @@ export const PDFReaderModal: React.FC<PDFReaderModalProps> = ({
 
             {/* Download Link */}
             <a
-              href={resource.url}
+              href={currentUrl}
               download={resource.title}
               aria-label="Download document"
               title="Download File"
@@ -251,6 +286,7 @@ export const PDFReaderModal: React.FC<PDFReaderModalProps> = ({
             {/* Fullscreen Toggle */}
             <button
               type="button"
+              className="pdf-fullscreen-btn"
               onClick={toggleFullscreen}
               aria-label={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
               title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
