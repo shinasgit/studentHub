@@ -1,0 +1,123 @@
+// scripts/font.mjs
+export const FONT_5X7 = {
+  ' ': [0, 0, 0, 0, 0],
+  'A': [0x7E, 0x11, 0x11, 0x11, 0x7E],
+  'B': [0x7F, 0x49, 0x49, 0x49, 0x36],
+  'C': [0x3E, 0x41, 0x41, 0x41, 0x22],
+  'D': [0x7F, 0x41, 0x41, 0x22, 0x1C],
+  'E': [0x7F, 0x49, 0x49, 0x49, 0x41],
+  'F': [0x7F, 0x09, 0x09, 0x09, 0x01],
+  'G': [0x3E, 0x41, 0x49, 0x49, 0x7A],
+  'H': [0x7F, 0x08, 0x08, 0x08, 0x7F],
+  'I': [0x00, 0x41, 0x7F, 0x41, 0x00],
+  'J': [0x20, 0x40, 0x41, 0x3F, 0x01],
+  'K': [0x7F, 0x08, 0x14, 0x22, 0x41],
+  'L': [0x7F, 0x40, 0x40, 0x40, 0x40],
+  'M': [0x7F, 0x02, 0x0C, 0x02, 0x7F],
+  'N': [0x7F, 0x04, 0x08, 0x10, 0x7F],
+  'O': [0x3E, 0x41, 0x41, 0x41, 0x3E],
+  'P': [0x7F, 0x09, 0x09, 0x09, 0x06],
+  'Q': [0x3E, 0x41, 0x51, 0x21, 0x5E],
+  'R': [0x7F, 0x09, 0x19, 0x29, 0x46],
+  'S': [0x46, 0x49, 0x49, 0x49, 0x31],
+  'T': [0x01, 0x01, 0x7F, 0x01, 0x01],
+  'U': [0x3F, 0x40, 0x40, 0x40, 0x3F],
+  'V': [0x1F, 0x20, 0x40, 0x20, 0x1F],
+  'W': [0x7F, 0x20, 0x18, 0x20, 0x7F],
+  'X': [0x63, 0x14, 0x08, 0x14, 0x63],
+  'Y': [0x07, 0x08, 0x70, 0x08, 0x07],
+  'Z': [0x61, 0x51, 0x49, 0x45, 0x43],
+  '0': [0x3E, 0x51, 0x49, 0x45, 0x3E],
+  '1': [0x00, 0x42, 0x7F, 0x40, 0x00],
+  '2': [0x42, 0x61, 0x51, 0x49, 0x46],
+  '3': [0x21, 0x41, 0x45, 0x4B, 0x31],
+  '4': [0x18, 0x14, 0x12, 0x7F, 0x10],
+  '5': [0x27, 0x45, 0x45, 0x45, 0x39],
+  '6': [0x3C, 0x4A, 0x49, 0x49, 0x30],
+  '7': [0x01, 0x71, 0x09, 0x05, 0x03],
+  '8': [0x36, 0x49, 0x49, 0x49, 0x36],
+  '9': [0x06, 0x49, 0x49, 0x29, 0x1E],
+  ':': [0x00, 0x36, 0x36, 0x00, 0x00],
+  '-': [0x08, 0x08, 0x08, 0x08, 0x08],
+  '.': [0x00, 0x60, 0x60, 0x00, 0x00],
+};
+
+export function renderTextToGrayscaleBitmap(lines, scale = 4) {
+  const charW = 6 * scale;
+  const charH = 10 * scale;
+  let maxLen = 0;
+  for (const l of lines) {
+    if (l.length > maxLen) maxLen = l.length;
+  }
+  
+  const width = Math.max(300, (maxLen + 4) * charW);
+  const height = Math.max(200, (lines.length + 3) * charH);
+  const buffer = Buffer.alloc(width * height, 255);
+  
+  let startY = 20 * scale;
+  for (const line of lines) {
+    let startX = 20 * scale;
+    const upper = line.toUpperCase();
+    for (let c = 0; c < upper.length; c++) {
+      const char = upper[c];
+      const glyph = FONT_5X7[char] || FONT_5X7[' '];
+      for (let col = 0; col < 5; col++) {
+        const colBits = glyph[col];
+        for (let row = 0; row < 7; row++) {
+          if ((colBits & (1 << row)) !== 0) {
+            for (let dy = 0; dy < scale; dy++) {
+              for (let dx = 0; dx < scale; dx++) {
+                const px = startX + col * scale + dx;
+                const py = startY + row * scale + dy;
+                if (px < width && py < height) {
+                  buffer[py * width + px] = 0;
+                }
+              }
+            }
+          }
+        }
+      }
+      startX += charW;
+    }
+    startY += charH;
+  }
+  
+  return { width, height, buffer };
+}
+
+export function createBmpBuffer(width, height, grayBuffer) {
+  const rowSize = Math.floor((24 * width + 31) / 32) * 4;
+  const pixelArraySize = rowSize * height;
+  const fileSize = 54 + pixelArraySize;
+  const bmp = Buffer.alloc(fileSize);
+
+  bmp.write('BM', 0);
+  bmp.writeUInt32LE(fileSize, 2);
+  bmp.writeUInt32LE(54, 10);
+
+  bmp.writeUInt32LE(40, 14);
+  bmp.writeInt32LE(width, 18);
+  bmp.writeInt32LE(height, 22);
+  bmp.writeUInt16LE(1, 26);
+  bmp.writeUInt16LE(24, 28);
+  bmp.writeUInt32LE(0, 30);
+  bmp.writeUInt32LE(pixelArraySize, 34);
+  bmp.writeInt32LE(2835, 38);
+  bmp.writeInt32LE(2835, 42);
+  bmp.writeUInt32LE(0, 46);
+  bmp.writeUInt32LE(0, 50);
+
+  for (let y = 0; y < height; y++) {
+    const srcY = height - 1 - y;
+    const rowOffset = 54 + y * rowSize;
+    for (let x = 0; x < width; x++) {
+      const gray = grayBuffer[srcY * width + x];
+      const pxOffset = rowOffset + x * 3;
+      bmp[pxOffset] = gray;
+      bmp[pxOffset + 1] = gray;
+      bmp[pxOffset + 2] = gray;
+    }
+  }
+
+  return bmp;
+}

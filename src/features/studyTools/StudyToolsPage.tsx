@@ -11,6 +11,7 @@ import {
   Plus,
   FolderArchive,
   ExternalLink,
+  FileSearch,
 } from 'lucide-react';
 import { Button } from '../../components/common/Button';
 import { getSubjects } from '../../services/subjectService';
@@ -24,6 +25,7 @@ import { ModuleSummaryView } from './ModuleSummaryView';
 import { QuickNotesView } from './QuickNotesView';
 import { PracticeQuestionsView } from './PracticeQuestionsView';
 import { McqQuizView } from './McqQuizView';
+import { PdfTextExtractorView } from './PdfTextExtractorView';
 
 interface StudyToolsPageProps {
   user: User;
@@ -62,6 +64,12 @@ const TOOL_TABS: ToolTabOption[] = [
     description: 'Test knowledge and review scores',
     icon: <CheckSquare size={17} />,
   },
+  {
+    id: 'extractor',
+    label: 'PDF Text & OCR',
+    description: 'Extract readable text & OCR scans',
+    icon: <FileSearch size={17} />,
+  },
 ];
 
 export const StudyToolsPage: React.FC<StudyToolsPageProps> = ({ user, subjects }) => {
@@ -71,11 +79,12 @@ export const StudyToolsPage: React.FC<StudyToolsPageProps> = ({ user, subjects }
   // Active Tool from URL param or default to 'summary'
   const paramTool = searchParams.get('tool') as StudyToolId | null;
   const initialTool: StudyToolId =
-    paramTool && ['summary', 'notes', 'practice', 'quiz'].includes(paramTool)
+    paramTool && ['summary', 'notes', 'practice', 'quiz', 'extractor'].includes(paramTool)
       ? paramTool
       : 'summary';
 
   const [activeTool, setActiveTool] = useState<StudyToolId>(initialTool);
+  const [preselectedMaterialId, setPreselectedMaterialId] = useState<string | null>(null);
 
   // Subjects state
   const [activeSubjects, setActiveSubjects] = useState<Subject[]>(subjects);
@@ -272,6 +281,7 @@ export const StudyToolsPage: React.FC<StudyToolsPageProps> = ({ user, subjects }
               moduleName: mod.title,
               url: att.url,
               size: att.size,
+              storageKey: att.storageKey || null,
             });
           }
         });
@@ -288,6 +298,7 @@ export const StudyToolsPage: React.FC<StudyToolsPageProps> = ({ user, subjects }
           moduleName: mod.title,
           url: mod.fileUrl,
           size: mod.fileSize || undefined,
+          storageKey: mod.fileStorageKey || null,
         });
       }
 
@@ -329,6 +340,7 @@ export const StudyToolsPage: React.FC<StudyToolsPageProps> = ({ user, subjects }
           moduleName: modules.find((m) => m.id === res.moduleId)?.title,
           url: res.url,
           size: res.fileSize || undefined,
+          storageKey: res.fileStorageKey || null,
         });
       }
     });
@@ -562,52 +574,92 @@ export const StudyToolsPage: React.FC<StudyToolsPageProps> = ({ user, subjects }
           {!loadingModules && !loadingResources && availableMaterials.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '4px' }}>
               {availableMaterials.map((mat) => (
-                <a
+                <div
                   key={mat.id}
-                  href={mat.url || '#'}
-                  target={mat.url ? '_blank' : undefined}
-                  rel="noreferrer"
                   style={{
-                    textDecoration: 'none',
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: '6px',
-                    padding: '5px 10px',
+                    padding: '4px 8px 4px 10px',
                     borderRadius: 'var(--radius-sm)',
                     background: 'var(--bg-card)',
                     border: '1px solid var(--border-subtle)',
                     fontSize: '0.78rem',
                     color: 'var(--text-primary)',
-                    maxWidth: '320px',
+                    maxWidth: '360px',
                     transition: 'border-color var(--transition-fast)',
                   }}
-                  title={mat.name}
                 >
-                  {mat.type === 'PDF' ? (
-                    <FileText size={13} color="#ef4444" style={{ flexShrink: 0 }} />
-                  ) : mat.type === 'Web' ? (
-                    <ExternalLink size={13} color="#06b6d4" style={{ flexShrink: 0 }} />
-                  ) : (
-                    <BookOpen size={13} color="var(--accent-primary)" style={{ flexShrink: 0 }} />
-                  )}
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {mat.name}
-                  </span>
-                  <span
+                  <a
+                    href={mat.url || '#'}
+                    target={mat.url ? '_blank' : undefined}
+                    rel="noreferrer"
                     style={{
-                      fontSize: '0.68rem',
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                      color: mat.type === 'PDF' ? '#ef4444' : '#06b6d4',
-                      background: mat.type === 'PDF' ? '#ef444415' : '#06b6d415',
-                      padding: '1px 5px',
-                      borderRadius: '3px',
-                      flexShrink: 0,
+                      textDecoration: 'none',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      color: 'inherit',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
                     }}
+                    title={mat.name}
                   >
-                    {mat.type}
-                  </span>
-                </a>
+                    {mat.type === 'PDF' ? (
+                      <FileText size={13} color="#ef4444" style={{ flexShrink: 0 }} />
+                    ) : mat.type === 'Web' ? (
+                      <ExternalLink size={13} color="#06b6d4" style={{ flexShrink: 0 }} />
+                    ) : (
+                      <BookOpen size={13} color="var(--accent-primary)" style={{ flexShrink: 0 }} />
+                    )}
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {mat.name}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        color: mat.type === 'PDF' ? '#ef4444' : '#06b6d4',
+                        background: mat.type === 'PDF' ? '#ef444415' : '#06b6d415',
+                        padding: '1px 5px',
+                        borderRadius: '3px',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {mat.type}
+                    </span>
+                  </a>
+
+                  {mat.type === 'PDF' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPreselectedMaterialId(mat.id);
+                        handleSelectTool('extractor');
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '3px',
+                        background: 'transparent',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: '3px',
+                        padding: '2px 6px',
+                        fontSize: '0.68rem',
+                        fontWeight: 600,
+                        color: 'var(--accent-primary)',
+                        cursor: 'pointer',
+                        marginLeft: '4px',
+                        transition: 'background var(--transition-fast)',
+                      }}
+                      title="Extract text & OCR from this PDF"
+                    >
+                      <FileSearch size={11} /> Extract
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
           )}
@@ -764,6 +816,19 @@ export const StudyToolsPage: React.FC<StudyToolsPageProps> = ({ user, subjects }
             selectedModuleId={selectedModuleId}
             materials={availableMaterials}
             loadingMaterials={loadingModules || loadingResources}
+          />
+        )}
+
+        {activeTool === 'extractor' && (
+          <PdfTextExtractorView
+            user={user}
+            subjects={activeSubjects}
+            modules={modules}
+            selectedSubjectId={selectedSubjectId}
+            selectedModuleId={selectedModuleId}
+            materials={availableMaterials}
+            loadingMaterials={loadingModules || loadingResources}
+            preselectedMaterialId={preselectedMaterialId}
           />
         )}
       </div>

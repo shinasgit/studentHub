@@ -1,4 +1,4 @@
-export type StudyToolId = 'summary' | 'notes' | 'practice' | 'quiz';
+export type StudyToolId = 'summary' | 'notes' | 'practice' | 'quiz' | 'extractor';
 
 export interface PracticeQuestionItem {
   id: string;
@@ -38,6 +38,7 @@ export interface StudyMaterial {
   moduleName?: string;
   url: string;
   size?: string | null;
+  storageKey?: string | null;
 }
 
 export interface StudyToolSelectionPayload {

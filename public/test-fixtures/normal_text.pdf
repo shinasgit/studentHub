@@ -1,0 +1,89 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 937 >>
+stream
+BT
+/F1 14 Tf
+50 720 Td
+(COMPUTER NETWORKS - LECTURE 1) Tj
+-50 -720 Td
+50 695 Td
+(Topic: OSI Reference Model Architecture) Tj
+-50 -695 Td
+50 670 Td
+(The Open Systems Interconnection model defines seven abstraction layers:) Tj
+-50 -670 Td
+50 645 Td
+(1. Physical Layer: Transmission of raw bitstream over physical media) Tj
+-50 -645 Td
+50 620 Td
+(2. Data Link Layer: Node-to-node data transfer and error detection \(Ethernet, MAC\)) Tj
+-50 -620 Td
+50 595 Td
+(3. Network Layer: Packet forwarding and routing through intermediate routers \(IP, ICMP\)) Tj
+-50 -595 Td
+50 570 Td
+(4. Transport Layer: End-to-end communication and reliability \(TCP, UDP\)) Tj
+-50 -570 Td
+50 545 Td
+(5. Session Layer: Dialogue control and token management) Tj
+-50 -545 Td
+50 520 Td
+(6. Presentation Layer: Data formatting, encryption, and compression) Tj
+-50 -520 Td
+50 495 Td
+(7. Application Layer: End-user protocols \(HTTP, DNS, FTP, SMTP\)) Tj
+-50 -495 Td
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents 6 0 R >>
+endobj
+6 0 obj
+<< /Length 435 >>
+stream
+BT
+/F1 14 Tf
+50 720 Td
+(COMPUTER NETWORKS - LECTURE 2) Tj
+-50 -720 Td
+50 695 Td
+(Topic: Transport Layer Protocols) Tj
+-50 -695 Td
+50 670 Td
+(Transmission Control Protocol \(TCP\) provides connection-oriented, reliable transmission.) Tj
+-50 -670 Td
+50 645 Td
+(User Datagram Protocol \(UDP\) provides connectionless, low-latency transmission.) Tj
+-50 -645 Td
+50 620 Td
+(TCP three-way handshake: SYN -> SYN-ACK -> ACK.) Tj
+-50 -620 Td
+ET
+endstream
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000127 00000 n 
+0000000302 00000 n 
+0000001289 00000 n 
+0000001464 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+1949
+%%EOF

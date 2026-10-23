@@ -183,11 +183,24 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, user, onLogout }) =>
                 {displayName}
               </span>
 
-              {/* Desktop Sign Out button */}
-              <div className="desktop-sign-out">
-                <Button variant="secondary" size="sm" onClick={onLogout} aria-label="Sign out">
-                  <LogOut size={14} />
-                  <span>Sign Out</span>
+              {/* Header Sign Out button (Icon only) */}
+              <div className="header-sign-out">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={onLogout}
+                  aria-label="Sign out"
+                  title="Sign out"
+                  style={{
+                    padding: '6px 8px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minWidth: '32px',
+                    height: '32px',
+                  }}
+                >
+                  <LogOut size={15} />
                 </Button>
               </div>
             </div>
@@ -370,9 +383,6 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, user, onLogout }) =>
         @media (max-width: 900px) {
           .desktop-nav { display: none !important; }
           .mobile-menu-btn { display: flex !important; }
-        }
-        @media (max-width: 640px) {
-          .desktop-sign-out { display: none !important; }
         }
         @media (max-width: 380px) {
           .auth-btn-label { display: none !important; }
