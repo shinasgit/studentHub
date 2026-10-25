@@ -26,6 +26,7 @@ import { QuickNotesView } from './QuickNotesView';
 import { PracticeQuestionsView } from './PracticeQuestionsView';
 import { McqQuizView } from './McqQuizView';
 import { PdfTextExtractorView } from './PdfTextExtractorView';
+import { OllamaConnectionCard } from './OllamaConnectionCard';
 
 interface StudyToolsPageProps {
   user: User;
@@ -698,6 +699,9 @@ export const StudyToolsPage: React.FC<StudyToolsPageProps> = ({ user, subjects }
           </Button>
         </div>
       )}
+
+      {/* Local Ollama LLM Connection & Testing Card */}
+      <OllamaConnectionCard />
 
       {/* Five Tool Tabs */}
       <div

@@ -116,6 +116,42 @@ export const getFileFromVault = async (key: string): Promise<Blob | null> => {
 };
 
 /**
+ * Search IndexedDB vault by file name or partial key if original storageKey is unknown.
+ */
+export const findFileInVaultByName = async (
+  fileName: string
+): Promise<{ blob: Blob; key: string } | null> => {
+  try {
+    const db = await openDatabase();
+    return new Promise((resolve) => {
+      const transaction = db.transaction(STORE_NAME, 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.openCursor();
+      const target = fileName.trim().toLowerCase();
+
+      request.onsuccess = (event) => {
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result;
+        if (cursor) {
+          const record = cursor.value as StoredFileRecord;
+          const recName = record.name?.toLowerCase() || '';
+          const recKey = record.key?.toLowerCase() || '';
+          if (recName === target || recName.endsWith(target) || recKey.includes(target)) {
+            resolve({ blob: record.blob, key: record.key });
+            return;
+          }
+          cursor.continue();
+        } else {
+          resolve(null);
+        }
+      };
+      request.onerror = () => resolve(null);
+    });
+  } catch {
+    return null;
+  }
+};
+
+/**
  * Create a temporary object URL for a file stored in IndexedDB.
  */
 export const getFileObjectUrl = async (key: string): Promise<string | null> => {

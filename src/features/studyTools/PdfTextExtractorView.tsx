@@ -154,6 +154,7 @@ export const PdfTextExtractorView: React.FC<PdfTextExtractorViewProps> = ({
         const resolved = await resolvePdfArrayBuffer({
           storageKey: targetMat.storageKey,
           url: targetMat.url,
+          fileName: targetMat.name,
         });
         sourceBuffer = resolved.buffer;
       }
@@ -259,16 +260,42 @@ export const PdfTextExtractorView: React.FC<PdfTextExtractorViewProps> = ({
 
       {/* Error alert */}
       {errorMsg && (
-        <div className="auth-alert auth-alert-error" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <AlertCircle size={18} style={{ flexShrink: 0 }} />
-          <span style={{ flex: 1 }}>{errorMsg}</span>
-          <button
-            type="button"
-            onClick={() => setErrorMsg(null)}
-            style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: '2px' }}
-          >
-            <X size={15} />
-          </button>
+        <div
+          className="auth-alert auth-alert-error"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '10px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: '240px' }}>
+            <AlertCircle size={18} style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: '0.85rem' }}>{errorMsg}</span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {(errorMsg.toLowerCase().includes('upload') || errorMsg.toLowerCase().includes('picker') || errorMsg.toLowerCase().includes('host')) && (
+              <Button
+                variant="secondary"
+                size="sm"
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                style={{ fontSize: '0.75rem', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+              >
+                <Upload size={12} /> Select File Now
+              </Button>
+            )}
+            <button
+              type="button"
+              onClick={() => setErrorMsg(null)}
+              style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: '2px' }}
+              title="Dismiss error"
+            >
+              <X size={15} />
+            </button>
+          </div>
         </div>
       )}
 

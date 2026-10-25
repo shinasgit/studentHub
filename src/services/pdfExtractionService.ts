@@ -1,7 +1,7 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { createWorker } from 'tesseract.js';
-import { getFileFromVault } from './fileStorageService';
+import { getFileFromVault, findFileInVaultByName } from './fileStorageService';
 
 // Configure the PDF.js worker
 if (typeof window !== 'undefined') {
@@ -49,35 +49,98 @@ export interface ExtractionOptions {
  * Fetch raw ArrayBuffer for a PDF either from IndexedDB Vault or remote URL.
  */
 export const resolvePdfArrayBuffer = async (
-  source: { storageKey?: string | null; url?: string | null; fileBlob?: Blob | null }
+  source: {
+    storageKey?: string | null;
+    url?: string | null;
+    fileBlob?: Blob | null;
+    fileName?: string | null;
+  }
 ): Promise<{ buffer: ArrayBuffer; fileName: string }> => {
-  // 1. If direct Blob is provided
+  const targetName = source.fileName || 'document.pdf';
+
+  // 1. Direct Blob (e.g. from local file drop)
   if (source.fileBlob) {
     const buffer = await source.fileBlob.arrayBuffer();
-    return { buffer, fileName: (source.fileBlob as File).name || 'document.pdf' };
+    return { buffer, fileName: (source.fileBlob as File).name || targetName };
   }
 
-  // 2. If storageKey is provided, check IndexedDB vault
+  // 2. Storage key lookup in local IndexedDB vault
   if (source.storageKey) {
-    const blob = await getFileFromVault(source.storageKey);
-    if (blob) {
-      const buffer = await blob.arrayBuffer();
-      return { buffer, fileName: source.storageKey.split('_').slice(3).join('_') || 'document.pdf' };
+    try {
+      const blob = await getFileFromVault(source.storageKey);
+      if (blob) {
+        const buffer = await blob.arrayBuffer();
+        return { buffer, fileName: targetName };
+      }
+    } catch (err) {
+      console.warn('Vault lookup by storageKey error:', err);
     }
   }
 
-  // 3. If URL is provided (remote or blob URL)
+  // 2b. Fallback: Search IndexedDB vault by file name if storageKey was lost/not found
+  if (source.fileName) {
+    try {
+      const match = await findFileInVaultByName(source.fileName);
+      if (match) {
+        const buffer = await match.blob.arrayBuffer();
+        return { buffer, fileName: source.fileName };
+      }
+    } catch (err) {
+      console.warn('Vault lookup by name fallback error:', err);
+    }
+  }
+
+  // 3. URL resolution (blob URL or remote network URL)
   if (source.url) {
-    const response = await fetch(source.url);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch PDF from URL (Status ${response.status} ${response.statusText}).`);
+    // If it's a blob: URL (temporary browser in-memory pointer)
+    if (source.url.startsWith('blob:')) {
+      const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+      const urlWithoutScheme = source.url.replace(/^blob:/, '');
+      const isCrossHost =
+        currentOrigin &&
+        !urlWithoutScheme.startsWith(currentOrigin) &&
+        (urlWithoutScheme.includes('localhost') || urlWithoutScheme.includes('127.0.0.1'));
+
+      if (isCrossHost) {
+        throw new Error(
+          `This PDF was attached while browsing on a different host (${urlWithoutScheme.split('/')[2] || 'other origin'}). ` +
+          `Browser security prevents loading temporary blob URLs across different origins. ` +
+          `Please select or upload "${targetName}" using the box below.`
+        );
+      }
+
+      try {
+        const response = await fetch(source.url);
+        if (!response.ok) {
+          throw new Error(`Blob URL status: ${response.status}`);
+        }
+        const buffer = await response.arrayBuffer();
+        return { buffer, fileName: targetName };
+      } catch {
+        throw new Error(
+          `The temporary browser link for "${targetName}" has expired across sessions. ` +
+          `Please use the "Upload PDF" box below to select this file from your computer.`
+        );
+      }
     }
-    const buffer = await response.arrayBuffer();
-    const guessedName = source.url.split('/').pop()?.split('?')[0] || 'document.pdf';
-    return { buffer, fileName: decodeURIComponent(guessedName) };
+
+    // Remote HTTP / HTTPS URL
+    try {
+      const response = await fetch(source.url);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch PDF from URL (Status ${response.status} ${response.statusText}).`);
+      }
+      const buffer = await response.arrayBuffer();
+      const guessedName = source.fileName || source.url.split('/').pop()?.split('?')[0] || 'document.pdf';
+      return { buffer, fileName: decodeURIComponent(guessedName) };
+    } catch (fetchErr: unknown) {
+      throw new Error(`Could not download PDF (${(fetchErr as Error).message || 'Network error'}).`);
+    }
   }
 
-  throw new Error('No valid PDF source (storageKey, fileBlob, or URL) was provided.');
+  throw new Error(
+    `No local file found in document vault for "${targetName}". Please upload it using the file picker below.`
+  );
 };
 
 /**
