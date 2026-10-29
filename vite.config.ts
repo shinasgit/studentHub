@@ -1,9 +1,26 @@
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
+import { handleExtractWebRequest } from './server/webExtractorMiddleware.ts'
+
+function webExtractorPlugin(): Plugin {
+  return {
+    name: 'web-extractor-plugin',
+    configureServer(server) {
+      server.middlewares.use('/api/extract-web', (req, res) => {
+        handleExtractWebRequest(req, res)
+      })
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use('/api/extract-web', (req, res) => {
+        handleExtractWebRequest(req, res)
+      })
+    },
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), webExtractorPlugin()],
   server: {
     proxy: {
       '/api/ollama': {

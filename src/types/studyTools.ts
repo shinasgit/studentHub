@@ -9,6 +9,8 @@ export interface PracticeQuestionItem {
   explanation?: string;
   topic?: string;
   difficulty?: 'easy' | 'medium' | 'hard';
+  sourceFile?: string;
+  pageRef?: string;
 }
 
 export interface McqOptionItem {
@@ -25,6 +27,9 @@ export interface McqQuestionItem {
   correctOptionId: string;
   explanation: string;
   topic?: string;
+  difficulty?: 'easy' | 'medium' | 'hard';
+  sourceFile?: string;
+  pageRef?: string;
 }
 
 export type StudyMaterialType = 'PDF' | 'Web' | 'Note' | 'Document';
