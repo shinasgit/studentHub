@@ -70,7 +70,7 @@ export const PracticeQuestionsView: React.FC<PracticeQuestionsViewProps> = ({
 
   // Generation Controls
   const [selectedMaterialScope, setSelectedMaterialScope] = useState<string>('all');
-  const [questionCount, setQuestionCount] = useState<number>(5);
+  const [questionCount, setQuestionCount] = useState<number>(10);
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
 
   // AI Generation State
@@ -599,7 +599,7 @@ ${q.explanation ? `\n**Explanation:** ${q.explanation}` : ''}${sourceMeta}
               Number of Questions
             </label>
             <div style={{ display: 'flex', gap: '6px' }}>
-              {[3, 5, 10].map((cnt) => (
+              {[10, 20, 30].map((cnt) => (
                 <button
                   key={cnt}
                   type="button"

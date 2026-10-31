@@ -16,6 +16,10 @@ import {
   DIFFICULTY_INSTRUCTIONS
 } from '../src/services/mcqQuizService.ts';
 
+import {
+  validatePracticeQuestions
+} from '../src/services/practiceQuestionsService.ts';
+
 let passedTests = 0;
 let totalTests = 0;
 
@@ -187,6 +191,25 @@ async function runTests() {
     'Medium difficulty specifically instructs conceptual understanding and mechanisms');
   assert(DIFFICULTY_INSTRUCTIONS.hard.toLowerCase().includes('analysis') || DIFFICULTY_INSTRUCTIONS.hard.toLowerCase().includes('plausible'),
     'Hard difficulty specifically instructs analytical reasoning, trade-offs, and plausible distractors');
+
+  console.log('\n--- 6. Testing Practice Questions 10, 20, 30 Validation & Deduplication ---');
+  const mockRawPQ = Array.from({ length: 30 }, (_, i) => ({
+    question: `Practice Question #${i + 1} regarding subject mechanisms?`,
+    answer: `Detailed answer for question #${i + 1}.`,
+    explanation: `Explanation for practice question #${i + 1}.`,
+    topic: `Topic ${(i % 5) + 1}`,
+    difficulty: 'medium',
+  }));
+
+  const validatedPQ = validatePracticeQuestions(mockRawPQ, 'subj-1', 'mod-1', 'medium', 'Document.pdf');
+  assert(validatedPQ.length === 30, `Validated all 30 practice questions (length = ${validatedPQ.length})`);
+  assert(validatedPQ[0].question.includes('#1'), 'First question is intact');
+  assert(validatedPQ[29].question.includes('#30'), '30th question is intact');
+
+  // Test deduplication with existingPrompts set
+  const existingSet = new Set([mockRawPQ[0].question.toLowerCase().replace(/[^a-z0-9]/g, '')]);
+  const deduplicatedPQ = validatePracticeQuestions(mockRawPQ, 'subj-1', 'mod-1', 'medium', 'Document.pdf', existingSet);
+  assert(deduplicatedPQ.length === 29, `Correctly deduplicated against existing questions (29 remaining)`);
 
   console.log(`\n========================================`);
   console.log(`🎉 ALL ${passedTests}/${totalTests} TESTS PASSED SUCCESSFULLY!`);

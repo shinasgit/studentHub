@@ -41,7 +41,7 @@ export interface GeneratePracticeQuestionsOptions {
   subjectName: string;
   moduleId?: string | null;
   moduleName?: string;
-  count?: number; // default: 5
+  count?: number; // default: 10 (supports 10, 20, 30)
   difficulty?: 'easy' | 'medium' | 'hard'; // default: 'medium'
   model?: string;
   customBaseUrl?: string;
@@ -79,14 +79,15 @@ export const validatePracticeQuestions = (
   subjectId: string,
   moduleId?: string | null,
   defaultDifficulty: 'easy' | 'medium' | 'hard' = 'medium',
-  defaultSourceFile?: string
+  defaultSourceFile?: string,
+  existingPrompts: Set<string> = new Set()
 ): PracticeQuestionItem[] => {
   if (!Array.isArray(rawItems)) {
-    throw new Error('Model output did not produce a valid array of questions.');
+    return [];
   }
 
   const validItems: PracticeQuestionItem[] = [];
-  const seenQuestions = new Set<string>();
+  const seenQuestions = new Set<string>(existingPrompts);
 
   for (let i = 0; i < rawItems.length; i++) {
     const item = rawItems[i] as Record<string, unknown>;
@@ -112,7 +113,7 @@ export const validatePracticeQuestions = (
     seenQuestions.add(normalized);
 
     validItems.push({
-      id: `pq-${Date.now()}-${i}`,
+      id: `pq-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 6)}`,
       subjectId,
       moduleId,
       question: questionText,
@@ -125,15 +126,12 @@ export const validatePracticeQuestions = (
     });
   }
 
-  if (validItems.length === 0) {
-    throw new Error('Model failed to generate any valid questions. Please try regenerating.');
-  }
-
   return validItems;
 };
 
 /**
  * Generate Practice Questions from study materials using local Ollama.
+ * Supports reliable generation of 10, 20, or 30 questions via batched inference.
  */
 export const generatePracticeQuestions = async (
   options: GeneratePracticeQuestionsOptions
@@ -144,7 +142,7 @@ export const generatePracticeQuestions = async (
     subjectName,
     moduleId,
     moduleName,
-    count = 5,
+    count = 10,
     difficulty = 'medium',
     model: requestedModel,
     customBaseUrl,
@@ -152,6 +150,7 @@ export const generatePracticeQuestions = async (
     onProgress,
   } = options;
 
+  const targetCount = count; // 10, 20, or 30
   const startTime = performance.now();
   const scopeTitle = moduleName ? `${subjectName} - ${moduleName}` : subjectName;
   const activeModel = requestedModel || getSelectedModel() || 'llama3.2:3b';
@@ -165,18 +164,12 @@ export const generatePracticeQuestions = async (
         stage: p.stage as PracticeQuestionsProgress['stage'],
         currentFile: p.currentFile,
         message: p.message,
-        percent: p.percent,
+        percent: Math.min(25, p.percent),
       });
     },
   });
 
   const { sources, combinedRawText, totalCharacters, hasOcr } = extraction;
-
-  onProgress?.({
-    stage: 'generating_questions',
-    message: `Generating ${count} ${difficulty} practice questions with local Ollama (${activeModel})...`,
-    percent: 65,
-  });
 
   // Safe excerpt limit to prevent context exhaustion
   const maxChars = 14000;
@@ -185,7 +178,35 @@ export const generatePracticeQuestions = async (
       ? combinedRawText.substring(0, maxChars) + '\n\n...[content truncated for question generation context budget]...'
       : combinedRawText;
 
-  const systemInstruction = `You are an expert university professor and exam designer. Your task is to generate challenging, high-quality practice questions based strictly on the provided study material.
+  // 2. Batched generation loop to reliably generate 10, 20, or 30 questions
+  const accumulatedQuestions: PracticeQuestionItem[] = [];
+  const seenPrompts = new Set<string>();
+  const batchTarget = 10;
+  const maxAttempts = Math.ceil(targetCount / 8) + 2;
+  let attempt = 0;
+
+  while (accumulatedQuestions.length < targetCount && attempt < maxAttempts) {
+    if (abortSignal?.aborted) {
+      throw new Error('Question generation was cancelled.');
+    }
+    attempt++;
+
+    const needed = targetCount - accumulatedQuestions.length;
+    const currentBatchSize = Math.min(batchTarget, needed);
+    const progressPercent = Math.min(95, 25 + Math.round((accumulatedQuestions.length / targetCount) * 70));
+
+    onProgress?.({
+      stage: 'generating_questions',
+      message: `Generating practice questions (${accumulatedQuestions.length}/${targetCount}) with local Ollama (${activeModel})...`,
+      percent: progressPercent,
+    });
+
+    const avoidanceInstruction =
+      accumulatedQuestions.length > 0
+        ? `\nAlready generated questions to avoid duplicating:\n${accumulatedQuestions.map((q, idx) => `${idx + 1}. ${q.question}`).slice(-8).join('\n')}\nGenerate NEW, distinct questions covering other aspects of the study material.`
+        : '';
+
+    const systemInstruction = `You are an expert university professor and exam designer. Your task is to generate challenging, high-quality practice questions based strictly on the provided study material.
 
 CRITICAL INSTRUCTIONS:
 1. Grounding: All questions, answers, and explanations MUST be directly derived from the provided text. Never invent course concepts, formulas, or facts.
@@ -193,7 +214,7 @@ CRITICAL INSTRUCTIONS:
    - Easy: Direct recall of key definitions, core concepts, and main components.
    - Medium: Conceptual understanding, functional comparisons, and mechanism explanations.
    - Hard: Problem solving, analytical breakdown, scenario analysis, and trade-off evaluation.
-3. Quantity: Exactly ${count} questions.
+3. Quantity: Exactly ${currentBatchSize} questions.
 4. Output Format: Return a STRICT JSON ARRAY of objects. Do not write any preamble, intro, or concluding remarks. Output only the JSON array:
 [
   {
@@ -207,54 +228,74 @@ CRITICAL INSTRUCTIONS:
   }
 ]`;
 
-  const userPrompt = `STUDY TOPIC: ${scopeTitle}
+    const userPrompt = `STUDY TOPIC: ${scopeTitle}
 SOURCES: ${sources.map((s) => s.fileName).join(', ')}
 
 STUDY MATERIAL:
 ${sourceContext}
+${avoidanceInstruction}
 
-Generate exactly ${count} ${difficulty} practice questions in valid JSON array format.`;
+Generate exactly ${currentBatchSize} ${difficulty} practice questions in valid JSON array format.`;
 
-  const completion = await generateCompletion({
-    model: activeModel,
-    prompt: userPrompt,
-    system: systemInstruction,
-    temperature: 0.3,
-    abortSignal,
-    customBaseUrl,
-  });
+    try {
+      const completion = await generateCompletion({
+        model: activeModel,
+        prompt: userPrompt,
+        system: systemInstruction,
+        temperature: 0.35,
+        abortSignal,
+        customBaseUrl,
+      });
 
-  // 3. Parse and Validate Output
-  let rawItems: unknown[];
-  try {
-    rawItems = cleanAndParseJson<unknown[]>(completion.text);
-  } catch {
-    // Retry once with a stricter formatting directive if initial output was malformed
-    const repairPrompt = `The previous response was not valid JSON. Fix and format the questions into a pure, valid JSON array:\n\n${completion.text.substring(0, 3000)}`;
-    const retryRes = await generateCompletion({
-      model: activeModel,
-      prompt: repairPrompt,
-      system: 'Output ONLY a valid JSON array. No markdown, no conversational text.',
-      temperature: 0.1,
-      abortSignal,
-      customBaseUrl,
-    });
-    rawItems = cleanAndParseJson<unknown[]>(retryRes.text);
+      let rawItems: unknown[] = [];
+      try {
+        rawItems = cleanAndParseJson<unknown[]>(completion.text);
+      } catch {
+        // Attempt quick repair if json fence had syntax glitch
+        const repairPrompt = `Format the following practice questions into a pure, valid JSON array. Do not write anything else:\n\n${completion.text.substring(0, 3000)}`;
+        const retryRes = await generateCompletion({
+          model: activeModel,
+          prompt: repairPrompt,
+          system: 'Output ONLY a valid JSON array of question objects.',
+          temperature: 0.1,
+          abortSignal,
+          customBaseUrl,
+        });
+        rawItems = cleanAndParseJson<unknown[]>(retryRes.text);
+      }
+
+      if (Array.isArray(rawItems)) {
+        const batchValid = validatePracticeQuestions(
+          rawItems,
+          subjectId,
+          moduleId,
+          difficulty,
+          sources[0]?.fileName,
+          seenPrompts
+        );
+
+        for (const q of batchValid) {
+          accumulatedQuestions.push(q);
+          const norm = q.question.toLowerCase().replace(/[^a-z0-9]/g, '');
+          seenPrompts.add(norm);
+          if (accumulatedQuestions.length >= targetCount) break;
+        }
+      }
+    } catch {
+      // Continue next attempt if one batch encountered an error
+    }
   }
 
-  const validatedQuestions = validatePracticeQuestions(
-    rawItems,
-    subjectId,
-    moduleId,
-    difficulty,
-    sources[0]?.fileName
-  );
+  if (accumulatedQuestions.length === 0) {
+    throw new Error('Model failed to generate any valid practice questions. Please ensure Ollama is running and try again.');
+  }
 
+  const finalQuestions = accumulatedQuestions.slice(0, targetCount);
   const durationMs = Math.round(performance.now() - startTime);
 
   onProgress?.({
     stage: 'completed',
-    message: `Generated ${validatedQuestions.length} practice questions!`,
+    message: `Generated ${finalQuestions.length} practice questions!`,
     percent: 100,
   });
 
@@ -263,7 +304,7 @@ Generate exactly ${count} ${difficulty} practice questions in valid JSON array f
     subjectName,
     moduleId,
     moduleName,
-    questions: validatedQuestions,
+    questions: finalQuestions,
     difficulty,
     sources,
     totalSourceCharacters: totalCharacters,

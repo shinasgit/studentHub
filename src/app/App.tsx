@@ -58,7 +58,8 @@ export const App: React.FC = () => {
     }
   };
 
-  const hideFooter = location.pathname === '/login' || location.pathname === '/signup';
+  const isChatbotRoute = location.pathname.startsWith('/chatbot') || location.pathname.startsWith('/chat');
+  const hideFooter = location.pathname === '/login' || location.pathname === '/signup' || isChatbotRoute;
 
   if (authLoading) {
     return (
@@ -77,7 +78,16 @@ export const App: React.FC = () => {
         onLogout={handleLogout}
       />
 
-      <main style={{ flex: 1 }}>
+      <main
+        style={{
+          flex: 1,
+          display: isChatbotRoute ? 'flex' : 'block',
+          flexDirection: isChatbotRoute ? 'column' : undefined,
+          height: isChatbotRoute ? 'calc(100dvh - var(--navbar-height))' : undefined,
+          maxHeight: isChatbotRoute ? 'calc(100dvh - var(--navbar-height))' : undefined,
+          overflow: isChatbotRoute ? 'hidden' : undefined,
+        }}
+      >
         <Routes>
           {/* Landing / Home */}
           <Route path="/" element={<LandingPage onGetStarted={() => navigate(currentUser ? '/dashboard' : '/signup')} />} />

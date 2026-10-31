@@ -12,12 +12,16 @@ import {
   FileText,
   Link as LinkIcon,
   Check,
+  History,
+  Clock,
+  Trash2,
 } from 'lucide-react';
 import { Button } from '../../components/common/Button';
 import type { Subject } from '../../types/subject';
 import type { Module } from '../../types/module';
-import type { ChatStudyScope, ChatScopeMode } from '../../types/chat';
+import type { ChatStudyScope, ChatScopeMode, ChatSession } from '../../types/chat';
 import { getModules } from '../../services/moduleService';
+import { getConversations, deleteConversation } from '../../services/chatService';
 
 interface ChatScopeSelectorProps {
   userId: string;
@@ -25,6 +29,7 @@ interface ChatScopeSelectorProps {
   initialSubjectId?: string;
   onStartSession: (scope: ChatStudyScope) => void;
   onNavigateToSubjects?: () => void;
+  onResumeSession?: (session: ChatSession) => void;
 }
 
 export const ChatScopeSelector: React.FC<ChatScopeSelectorProps> = ({
@@ -33,7 +38,12 @@ export const ChatScopeSelector: React.FC<ChatScopeSelectorProps> = ({
   initialSubjectId,
   onStartSession,
   onNavigateToSubjects,
+  onResumeSession,
 }) => {
+  // Recent conversations state
+  const [recentSessions, setRecentSessions] = useState<ChatSession[]>([]);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+
   // Selected Subject state
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>(() => {
     if (initialSubjectId && subjects.some((s) => s.id === initialSubjectId)) {
@@ -91,6 +101,41 @@ export const ChatScopeSelector: React.FC<ChatScopeSelectorProps> = ({
       isMounted = false;
     };
   }, [userId, selectedSubjectId]);
+
+  // Load recent conversations for this user
+  useEffect(() => {
+    if (!userId) return;
+    let isMounted = true;
+    const fetchRecentSessions = async () => {
+      try {
+        const convs = await getConversations(userId);
+        if (isMounted) {
+          setRecentSessions(convs.slice(0, 4));
+        }
+      } catch (err) {
+        console.error('Failed to load recent sessions:', err);
+      }
+    };
+    fetchRecentSessions();
+    return () => {
+      isMounted = false;
+    };
+  }, [userId]);
+
+  const handleDeleteRecentSession = async (convId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!userId) return;
+    if (!window.confirm('Are you sure you want to delete this conversation?')) return;
+    setDeletingSessionId(convId);
+    try {
+      await deleteConversation(userId, convId);
+      setRecentSessions((prev) => prev.filter((c) => c.id !== convId));
+    } catch (err) {
+      console.error('Failed to delete conversation:', err);
+    } finally {
+      setDeletingSessionId(null);
+    }
+  };
 
   // Module selection helpers
   const selectedModuleCount = Object.values(selectedModuleIds).filter(Boolean).length;
@@ -251,6 +296,123 @@ export const ChatScopeSelector: React.FC<ChatScopeSelectorProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Optional: Resume Recent Conversations */}
+      {recentSessions.length > 0 && onResumeSession && (
+        <div
+          style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '20px 24px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <History size={16} color="var(--accent-primary)" />
+              <h2 style={{ fontSize: '0.98rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+                Resume Recent Study Session
+              </h2>
+            </div>
+            <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+              Click any session to continue
+            </span>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+              gap: '10px',
+            }}
+          >
+            {recentSessions.map((session) => (
+              <div
+                key={session.id}
+                onClick={() => onResumeSession(session)}
+                style={{
+                  padding: '12px',
+                  borderRadius: 'var(--radius-md)',
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border-subtle)',
+                  cursor: 'pointer',
+                  transition: 'all var(--transition-fast)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--accent-primary-border)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '6px' }}>
+                  <span
+                    style={{
+                      fontSize: '0.84rem',
+                      fontWeight: 600,
+                      color: 'var(--text-primary)',
+                      lineHeight: 1.3,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={session.title}
+                  >
+                    {session.title || `${session.scope?.subjectName || 'Study'} Session`}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={(e) => handleDeleteRecentSession(session.id, e)}
+                    disabled={deletingSessionId === session.id}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      padding: '2px',
+                      flexShrink: 0,
+                    }}
+                    title="Delete conversation"
+                  >
+                    {deletingSessionId === session.id ? (
+                      <Loader2 size={12} className="spin" />
+                    ) : (
+                      <Trash2 size={12} />
+                    )}
+                  </button>
+                </div>
+
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: '0.72rem',
+                    color: 'var(--text-muted)',
+                  }}
+                >
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    <BookOpen size={11} color="var(--accent-primary)" />
+                    {session.scope?.subjectCode || session.scope?.subjectName || 'Course'}
+                  </span>
+
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    <Clock size={11} />
+                    {new Date(session.updatedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Step 1: Subject Selection */}
       <div

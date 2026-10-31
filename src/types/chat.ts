@@ -21,13 +21,32 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   isMock?: boolean;
+  isError?: boolean;
+  modelUsed?: string;
+  durationMs?: number;
 }
 
 export interface ChatSession {
   id: string;
   userId: string;
+  title?: string;
   scope: ChatStudyScope;
   messages: ChatMessage[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface GenerateChatResponseOptions {
+  messages: ChatMessage[];
+  scope: ChatStudyScope;
+  model?: string;
+  temperature?: number;
+  abortSignal?: AbortSignal;
+  customBaseUrl?: string;
+}
+
+export interface GenerateChatResponseResult {
+  text: string;
+  model: string;
+  durationMs: number;
 }
