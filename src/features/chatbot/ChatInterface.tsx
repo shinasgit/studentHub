@@ -5,7 +5,6 @@ import {
   Bot,
   Sparkles,
   BookOpen,
-  Layers,
   Square,
   RefreshCw,
   Copy,
@@ -625,13 +624,12 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
               background: 'var(--bg-tertiary)',
               color: 'var(--text-secondary)',
               border: '1px solid var(--border-subtle)',
+              display: 'inline-flex',
               alignItems: 'center',
-              gap: '4px',
               whiteSpace: 'nowrap',
             }}
           >
-            {isEntire ? <BookOpen size={10} /> : <Layers size={10} />}
-            <span>{isEntire ? 'Entire Subject' : `${scope.moduleNames.length} module(s)`}</span>
+            {isEntire ? 'Entire Subject' : `${scope.moduleNames.length} module(s)`}
           </span>
 
           {/* Change Scope Button */}
@@ -661,6 +659,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       {/* ========================================================= */}
       <div
         ref={conversationContainerRef}
+        className="chatbot-scroll-area"
         style={{
           flex: 1,
           overflowY: 'auto',
@@ -677,7 +676,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             width: '100%',
             maxWidth: '920px',
             margin: '0 auto',
-            padding: '20px clamp(12px, 2.5vw, 24px) 24px',
+            padding: '12px clamp(12px, 2.5vw, 24px) 16px',
             display: 'flex',
             flexDirection: 'column',
             flex: 1,
@@ -690,7 +689,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             <div
               style={{
                 margin: 'auto 0',
-                padding: '20px 0',
+                padding: '8px 0',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
@@ -700,8 +699,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
               {/* Glowing Icon Badge */}
               <div
                 style={{
-                  width: '54px',
-                  height: '54px',
+                  width: '44px',
+                  height: '44px',
                   borderRadius: 'var(--radius-lg)',
                   background: 'var(--accent-primary-subtle)',
                   border: '1px solid var(--accent-primary-border)',
@@ -709,21 +708,21 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  marginBottom: '16px',
-                  boxShadow: '0 8px 24px rgba(79, 100, 241, 0.15)',
+                  marginBottom: '10px',
+                  boxShadow: '0 8px 20px rgba(79, 100, 241, 0.15)',
                 }}
               >
-                <Sparkles size={26} />
+                <Sparkles size={22} />
               </div>
 
               {/* Main Heading & Description */}
               <h1
                 style={{
-                  fontSize: 'clamp(1.35rem, 3.2vw, 1.85rem)',
+                  fontSize: 'clamp(1.2rem, 2.4vw, 1.55rem)',
                   fontWeight: 800,
                   color: 'var(--text-primary)',
                   letterSpacing: '-0.02em',
-                  margin: '0 0 8px 0',
+                  margin: '0 0 6px 0',
                   lineHeight: 1.25,
                 }}
               >
@@ -732,11 +731,11 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
               <p
                 style={{
-                  fontSize: '0.90rem',
+                  fontSize: '0.86rem',
                   color: 'var(--text-secondary)',
-                  maxWidth: '520px',
-                  margin: '0 0 20px 0',
-                  lineHeight: 1.5,
+                  maxWidth: '480px',
+                  margin: '0 0 14px 0',
+                  lineHeight: 1.45,
                 }}
               >
                 Understand concepts, explore new ideas, and prepare for exams with your AI learning companion.
@@ -748,13 +747,13 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '6px',
-                  padding: '4px 12px',
+                  padding: '3px 12px',
                   borderRadius: 'var(--radius-full)',
                   background: 'var(--bg-secondary)',
                   border: '1px solid var(--border-medium)',
-                  fontSize: '0.76rem',
+                  fontSize: '0.74rem',
                   color: 'var(--text-secondary)',
-                  marginBottom: '28px',
+                  marginBottom: '16px',
                 }}
               >
                 <BookOpen size={12} color="var(--accent-primary)" />
@@ -769,7 +768,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     border: 'none',
                     color: 'var(--accent-primary)',
                     cursor: 'pointer',
-                    fontSize: '0.76rem',
+                    fontSize: '0.74rem',
                     fontWeight: 600,
                     padding: '0 0 0 4px',
                   }}
@@ -784,7 +783,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 style={{
                   display: 'grid',
                   gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-                  gap: '12px',
+                  gap: '10px',
                   width: '100%',
                   textAlign: 'left',
                 }}
@@ -795,14 +794,14 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     type="button"
                     onClick={() => handleSendMessage(card.prompt)}
                     style={{
-                      padding: '16px',
-                      borderRadius: 'var(--radius-lg)',
+                      padding: '12px 14px',
+                      borderRadius: 'var(--radius-md)',
                       background: 'var(--bg-secondary)',
                       border: '1px solid var(--border-subtle)',
                       cursor: 'pointer',
                       display: 'flex',
                       flexDirection: 'column',
-                      gap: '8px',
+                      gap: '5px',
                       transition: 'all var(--transition-fast)',
                       boxShadow: 'var(--shadow-xs)',
                     }}
@@ -817,13 +816,13 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                       e.currentTarget.style.boxShadow = 'var(--shadow-xs)';
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
                       {card.icon}
-                      <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      <span style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                         {card.title}
                       </span>
                     </div>
-                    <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.4 }}>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.35 }}>
                       {card.description}
                     </p>
                   </button>

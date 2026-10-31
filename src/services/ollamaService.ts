@@ -98,8 +98,11 @@ export const parseOllamaError = (
   }
 
   // 3. Ollama not installed or not running
+  const causeCode = (error as { cause?: { code?: string } })?.cause?.code || '';
   if (
     rawMsg.includes('Failed to fetch') ||
+    rawMsg.includes('fetch failed') ||
+    causeCode === 'ECONNREFUSED' ||
     rawMsg.includes('ECONNREFUSED') ||
     rawMsg.includes('connection refused')
   ) {

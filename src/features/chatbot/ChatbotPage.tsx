@@ -119,7 +119,7 @@ export const ChatbotPage: React.FC<ChatbotPageProps> = ({ user, subjects }) => {
         width: '100%',
         maxWidth: '1200px',
         margin: '0 auto',
-        padding: '16px clamp(12px, 3vw, 24px) 20px',
+        padding: '10px clamp(10px, 2vw, 20px) 12px',
         height: '100%',
         display: 'flex',
         flexDirection: 'column',

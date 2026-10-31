@@ -24,5 +24,10 @@ dist-ssr
 *.ntvs*
 *.njsproj
 *.sln
-*.sw?
 *.traineddata
+
+# Python virtual environment & ChromaDB persistence
+.venv
+venv
+chroma_data
+
