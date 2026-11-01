@@ -23,6 +23,28 @@ import {
 export const DEFAULT_DOCUMENT_EMBEDDING_BATCH_SIZE = 16;
 
 /**
+ * Asymmetric task prefix for document chunks embedded with Nomic Embed Text.
+ */
+export const NOMIC_DOCUMENT_PREFIX = 'search_document: ';
+
+/**
+ * Version identifier for vectors generated using the Nomic document prefix.
+ */
+export const NOMIC_EMBEDDING_VERSION = 'v2_nomic_prefix';
+
+/**
+ * Prepares text for document embedding with Nomic Embed Text.
+ * Prepends 'search_document: ' prefix if not already present.
+ */
+export const formatNomicDocumentText = (text: string): string => {
+  const clean = text || '';
+  if (clean.startsWith(NOMIC_DOCUMENT_PREFIX)) {
+    return clean;
+  }
+  return `${NOMIC_DOCUMENT_PREFIX}${clean}`;
+};
+
+/**
  * Extracts an array of TextChunk objects and top-level metadata from either
  * a raw TextChunk array or a ChunkingResult.
  */
@@ -220,7 +242,7 @@ export const embedChunks = async (
   for (let b = 0; b < totalBatches; b++) {
     const batchStart = b * batchSize;
     const batchChunks = chunks.slice(batchStart, batchStart + batchSize);
-    const batchTexts = batchChunks.map((c) => c.text);
+    const batchTexts = batchChunks.map((c) => formatNomicDocumentText(c.text));
 
     try {
       // Generate embeddings for current sub-batch via Ollama
@@ -271,6 +293,7 @@ export const embedChunks = async (
           characterCount: chunk.characterCount,
           metadata: {
             ...chunk.metadata,
+            embeddingVersion: NOMIC_EMBEDDING_VERSION,
           },
         };
 

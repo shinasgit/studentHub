@@ -16,7 +16,7 @@ import {
   orderBy,
   Timestamp,
 } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, auth } from '../lib/firebase';
 import type {
   ChatMessage,
   ChatStudyScope,
@@ -31,6 +31,7 @@ import {
   getSelectedModel,
   parseOllamaError,
 } from './ollamaService';
+import { generateRagAnswer } from './ragService';
 
 export const STARTER_PROMPTS: string[] = [
   'Explain the important concepts',
@@ -138,17 +139,104 @@ export const generateChatResponse = async (
   const {
     messages,
     scope,
+    studentId: providedStudentId,
     model: requestedModel,
-    temperature = 0.5,
+    temperature = 0.3,
     abortSignal,
     customBaseUrl,
+    customChromaUrl,
+    enableRag = true,
+    resourceId,
+    topK,
+    minSimilarity,
+    maxContextChars,
+    collectionName,
+    maxHistoryTurns,
+    enableQueryCondensation,
   } = options;
 
   const activeModel = requestedModel || getSelectedModel() || 'llama3.2:3b';
+
+  // 1. RAG Workflow: Ground the answer in retrieved study materials
+  let latestUserIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].sender === 'user') {
+      latestUserIndex = i;
+      break;
+    }
+  }
+
+  const latestUserMessage = latestUserIndex !== -1 ? messages[latestUserIndex] : undefined;
+
+  // Extract prior conversation history (all valid user/assistant turns prior to latestUserMessage)
+  const priorHistory =
+    latestUserIndex > 0
+      ? messages
+          .slice(0, latestUserIndex)
+          .filter(
+            (m) =>
+              (m.sender === 'user' || m.sender === 'assistant') &&
+              !m.isError &&
+              typeof m.content === 'string' &&
+              m.content.trim().length > 0
+          )
+          .map((m) => ({
+            sender: m.sender as 'user' | 'assistant',
+            content: m.content.trim(),
+          }))
+      : [];
+
+  const resolvedStudentId =
+    providedStudentId || (typeof window !== 'undefined' ? auth?.currentUser?.uid : undefined);
+
+  if (
+    enableRag &&
+    latestUserMessage &&
+    latestUserMessage.content.trim() &&
+    resolvedStudentId &&
+    scope?.subjectId
+  ) {
+    const ragResult = await generateRagAnswer(
+      latestUserMessage.content,
+      scope,
+      resolvedStudentId,
+      {
+        model: activeModel,
+        temperature,
+        topK,
+        minSimilarity,
+        maxContextChars,
+        resourceId,
+        collectionName,
+        customOllamaUrl: customBaseUrl,
+        customChromaUrl,
+        abortSignal,
+        conversationHistory: priorHistory,
+        maxHistoryTurns,
+        enableQueryCondensation,
+      }
+    );
+
+    if (ragResult.status === 'error') {
+      throw new Error(ragResult.error || 'Failed to generate grounded RAG answer.');
+    }
+
+    return {
+      text: ragResult.answer,
+      model: ragResult.model || activeModel,
+      durationMs: ragResult.durationMs,
+      sources: ragResult.sources,
+      isRagGrounded: ragResult.isGrounded,
+      retrievalDurationMs: ragResult.retrievalDurationMs,
+      generationDurationMs: ragResult.generationDurationMs,
+      condensedQuestion: ragResult.condensedQuestion,
+      condensationDurationMs: ragResult.condensationDurationMs,
+    };
+  }
+
+  // 2. Non-RAG conversational fallback (e.g. general tutor dialogue or when scope has no subject)
   const systemPrompt = buildEducationalSystemPrompt(scope);
 
-  // 1. Prepare conversation messages for Ollama API
-  // Filter out system error alerts and limit history to the last 14 turns to preserve context budget
   const relevantMessages = messages
     .filter((m) => m.sender === 'user' || m.sender === 'assistant')
     .slice(-14);
@@ -162,7 +250,6 @@ export const generateChatResponse = async (
   ];
 
   try {
-    // 2. Attempt standard /api/chat endpoint
     const result = await generateChat({
       model: activeModel,
       messages: ollamaMessages,
@@ -230,14 +317,18 @@ export const generateChatResponse = async (
 export const sendChatMessage = async (
   scope: ChatStudyScope,
   conversationHistory: ChatMessage[],
+  studentId?: string,
   abortSignal?: AbortSignal,
-  customBaseUrl?: string
+  customBaseUrl?: string,
+  customChromaUrl?: string
 ): Promise<ChatMessage> => {
   const result = await generateChatResponse({
     messages: conversationHistory,
     scope,
+    studentId,
     abortSignal,
     customBaseUrl,
+    customChromaUrl,
   });
 
   return {
@@ -247,6 +338,8 @@ export const sendChatMessage = async (
     timestamp: new Date().toISOString(),
     modelUsed: result.model,
     durationMs: result.durationMs,
+    sources: result.sources,
+    isRagGrounded: result.isRagGrounded,
   };
 };
 

@@ -72,7 +72,16 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div
+      style={{
+        minHeight: '100vh',
+        height: isChatbotRoute ? '100dvh' : undefined,
+        maxHeight: isChatbotRoute ? '100dvh' : undefined,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: isChatbotRoute ? 'hidden' : undefined,
+      }}
+    >
       <Navbar
         user={currentUser}
         onLogout={handleLogout}
@@ -81,6 +90,7 @@ export const App: React.FC = () => {
       <main
         style={{
           flex: 1,
+          minHeight: 0,
           display: isChatbotRoute ? 'flex' : 'block',
           flexDirection: isChatbotRoute ? 'column' : undefined,
           height: isChatbotRoute ? 'calc(100dvh - var(--navbar-height))' : undefined,

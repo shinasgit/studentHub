@@ -3,6 +3,7 @@
 // 100% Free, Local Privacy, Persistent on Disk
 
 import type { EmbeddedChunk } from '../types/embedding';
+import { NOMIC_EMBED_DIMENSIONS } from '../types/embedding';
 import type {
   ChromaConnectionStatus,
   ChromaCollection,
@@ -12,6 +13,8 @@ import type {
   ChromaOperationResult,
   ChromaCollectionStats,
   ChromaFilterCriteria,
+  ChromaQueryOptions,
+  ChromaQueryResultItem,
 } from '../types/chroma';
 import {
   DEFAULT_CHROMA_COLLECTION,
@@ -55,7 +58,7 @@ const getChromaV2Url = (customBaseUrl?: string): string => {
 /**
  * Builds the URL for tenant and database scoped collection endpoints in Chroma v2.
  */
-const getCollectionsEndpoint = (customBaseUrl?: string): string => {
+export const getCollectionsEndpoint = (customBaseUrl?: string): string => {
   const v2 = getChromaV2Url(customBaseUrl);
   return `${v2}/tenants/${DEFAULT_TENANT}/databases/${DEFAULT_DATABASE}/collections`;
 };
@@ -276,9 +279,26 @@ export const sanitizeChromaMetadata = (chunk: EmbeddedChunk): ChromaVectorMetada
     characterCount: chunk.characterCount,
   };
 
+  // Preserve multi-page tracking fields if present
+  const pageEndNumber = chunk.pageEndNumber ?? chunk.metadata?.pageEndNumber;
+  if (typeof pageEndNumber === 'number') {
+    baseMeta.pageEndNumber = pageEndNumber;
+  }
+  const pageRange =
+    chunk.pageRange ??
+    chunk.metadata?.pageRange ??
+    (typeof pageEndNumber === 'number' && pageEndNumber > (chunk.pageNumber ?? 1)
+      ? `${chunk.pageNumber ?? 1}–${pageEndNumber}`
+      : undefined);
+  if (typeof pageRange === 'string') {
+    baseMeta.pageRange = pageRange;
+  }
+
   // Attach studentId if present in chunk metadata (for multi-student data isolation)
   if (chunk.metadata?.studentId && typeof chunk.metadata.studentId === 'string') {
     baseMeta.studentId = chunk.metadata.studentId;
+  } else if (chunk.studentId && typeof chunk.studentId === 'string') {
+    baseMeta.studentId = chunk.studentId;
   }
 
   // Preserve extraction flags if present
@@ -287,6 +307,21 @@ export const sanitizeChromaMetadata = (chunk: EmbeddedChunk): ChromaVectorMetada
   }
   if (chunk.metadata?.isScanned !== undefined) {
     baseMeta.isScanned = Boolean(chunk.metadata.isScanned);
+  }
+
+  // Preserve embeddingVersion if present (for Nomic task prefix migration tracking)
+  if (chunk.metadata?.embeddingVersion && typeof chunk.metadata.embeddingVersion === 'string') {
+    baseMeta.embeddingVersion = chunk.metadata.embeddingVersion;
+  }
+
+  // Preserve any other primitive metadata attributes
+  for (const [key, val] of Object.entries(chunk.metadata || {})) {
+    if (
+      baseMeta[key] === undefined &&
+      (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean')
+    ) {
+      baseMeta[key] = val;
+    }
   }
 
   return baseMeta;
@@ -459,24 +494,67 @@ export const getChunksByIds = async (
 
 /**
  * Builds a valid Chroma metadata where filter dictionary from ChromaFilterCriteria.
+ * Supports:
+ * - studentId (cross-tenant isolation)
+ * - subjectId (course scoping)
+ * - moduleId (single module scoping)
+ * - moduleIds (multi-module scoping via ChromaDB $in operator)
+ * - resourceId (single document scoping)
+ * - Any additional custom metadata key-value pairs
  */
 export const buildChromaWhereFilter = (
   filter: ChromaFilterCriteria
 ): Record<string, unknown> | undefined => {
-  const activeEntries = Object.entries(filter).filter(
-    ([, val]) => val !== undefined && val !== null && val !== ''
-  );
+  if (!filter || typeof filter !== 'object') return undefined;
 
-  if (activeEntries.length === 0) return undefined;
+  const clauses: Record<string, unknown>[] = [];
 
-  if (activeEntries.length === 1) {
-    const [key, val] = activeEntries[0];
-    return { [key]: val };
+  // 1. Student isolation (string equality)
+  if (filter.studentId && typeof filter.studentId === 'string' && filter.studentId.trim()) {
+    clauses.push({ studentId: filter.studentId.trim() });
   }
 
-  // Multi-attribute filter using $and
+  // 2. Subject filter (string equality)
+  if (filter.subjectId && typeof filter.subjectId === 'string' && filter.subjectId.trim()) {
+    clauses.push({ subjectId: filter.subjectId.trim() });
+  }
+
+  // 3. Resource filter (string equality)
+  if (filter.resourceId && typeof filter.resourceId === 'string' && filter.resourceId.trim()) {
+    clauses.push({ resourceId: filter.resourceId.trim() });
+  }
+
+  // 4. Module filtering: Multi-module ($in) or single module equality
+  if (Array.isArray(filter.moduleIds) && filter.moduleIds.length > 0) {
+    const validModuleIds = filter.moduleIds
+      .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+      .map((id) => id.trim());
+
+    if (validModuleIds.length === 1) {
+      clauses.push({ moduleId: validModuleIds[0] });
+    } else if (validModuleIds.length > 1) {
+      clauses.push({ moduleId: { $in: validModuleIds } });
+    }
+  } else if (filter.moduleId && typeof filter.moduleId === 'string' && filter.moduleId.trim()) {
+    clauses.push({ moduleId: filter.moduleId.trim() });
+  }
+
+  // 5. Arbitrary additional metadata attributes
+  for (const [key, val] of Object.entries(filter)) {
+    if (['studentId', 'subjectId', 'resourceId', 'moduleId', 'moduleIds'].includes(key)) {
+      continue;
+    }
+    if (val !== undefined && val !== null && val !== '') {
+      clauses.push({ [key]: val });
+    }
+  }
+
+  if (clauses.length === 0) return undefined;
+  if (clauses.length === 1) return clauses[0];
+
+  // ChromaDB requires $and when combining multiple criteria
   return {
-    $and: activeEntries.map(([key, val]) => ({ [key]: val })),
+    $and: clauses,
   };
 };
 
@@ -637,3 +715,108 @@ export const getCollectionStats = async (
     throw new Error(parseChromaError(err, options?.customBaseUrl || getChromaBaseUrl()));
   }
 };
+
+/**
+ * Queries ChromaDB for document chunks semantically closest to the given embedding vector.
+ * Supports configurable topK, metadata filtering (where / filter), and returns text, metadata, and distances.
+ */
+export const querySimilarChunks = async (
+  queryEmbedding: number[],
+  options?: ChromaQueryOptions
+): Promise<ChromaQueryResultItem[]> => {
+  if (!Array.isArray(queryEmbedding)) {
+    throw new Error('Query embedding must be an array of numbers.');
+  }
+
+  if (queryEmbedding.length !== NOMIC_EMBED_DIMENSIONS) {
+    throw new Error(
+      `Invalid embedding dimensions: Expected exactly ${NOMIC_EMBED_DIMENSIONS} dimensions for nomic-embed-text, received ${queryEmbedding.length}.`
+    );
+  }
+
+  for (let i = 0; i < queryEmbedding.length; i++) {
+    const val = queryEmbedding[i];
+    if (typeof val !== 'number' || !Number.isFinite(val)) {
+      throw new Error(`Invalid query embedding: Element at index ${i} is not a finite number.`);
+    }
+  }
+
+  const collectionName = options?.collectionName || DEFAULT_CHROMA_COLLECTION;
+  const collection = await getCollection(collectionName, options);
+  if (!collection) {
+    return [];
+  }
+
+  const topK = Math.max(1, options?.topK ?? 5);
+
+  let whereFilter: Record<string, unknown> | undefined = options?.where;
+  if (!whereFilter && options?.filter) {
+    whereFilter = buildChromaWhereFilter(options.filter);
+  }
+
+  const endpoint = `${getCollectionsEndpoint(options?.customBaseUrl)}/${collection.id}/query`;
+
+  const payload: Record<string, unknown> = {
+    query_embeddings: [queryEmbedding],
+    n_results: topK,
+    include: ['documents', 'metadatas', 'distances'],
+  };
+
+  if (whereFilter && Object.keys(whereFilter).length > 0) {
+    payload.where = whereFilter;
+  }
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: options?.abortSignal,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      throw new Error(`Failed to query collection "${collectionName}" (${response.status}): ${errText}`);
+    }
+
+    const data = (await response.json()) as {
+      ids?: string[][];
+      documents?: Array<Array<string | null>>;
+      metadatas?: Array<Array<ChromaVectorMetadata | null>>;
+      distances?: number[][];
+    };
+
+    if (!data.ids || !data.ids[0] || data.ids[0].length === 0) {
+      return [];
+    }
+
+    const queryIds = data.ids[0];
+    const queryDocs = data.documents?.[0] || [];
+    const queryMetas = data.metadatas?.[0] || [];
+    const queryDists = data.distances?.[0] || [];
+
+    const results: ChromaQueryResultItem[] = [];
+
+    for (let i = 0; i < queryIds.length; i++) {
+      const id = queryIds[i];
+      const text = queryDocs[i] ?? '';
+      const metadata = (queryMetas[i] || {}) as ChromaVectorMetadata;
+      const distance = queryDists[i] !== undefined ? queryDists[i] : 1.0;
+
+      results.push({
+        id,
+        text,
+        metadata,
+        distance,
+      });
+    }
+
+    return results;
+  } catch (err) {
+    throw new Error(parseChromaError(err, options?.customBaseUrl || getChromaBaseUrl()));
+  }
+};
+

@@ -15,6 +15,8 @@ export interface ChatStudyScope {
   resourceCount?: number;
 }
 
+import type { RagSourceReference } from './rag';
+
 export interface ChatMessage {
   id: string;
   sender: 'user' | 'assistant' | 'system';
@@ -24,6 +26,12 @@ export interface ChatMessage {
   isError?: boolean;
   modelUsed?: string;
   durationMs?: number;
+  sources?: RagSourceReference[];
+  isRagGrounded?: boolean;
+  retrievalDurationMs?: number;
+  generationDurationMs?: number;
+  condensedQuestion?: string;
+  condensationDurationMs?: number;
 }
 
 export interface ChatSession {
@@ -39,14 +47,31 @@ export interface ChatSession {
 export interface GenerateChatResponseOptions {
   messages: ChatMessage[];
   scope: ChatStudyScope;
+  studentId?: string;
   model?: string;
   temperature?: number;
   abortSignal?: AbortSignal;
   customBaseUrl?: string;
+  customChromaUrl?: string;
+  enableRag?: boolean;
+  resourceId?: string;
+  topK?: number;
+  minSimilarity?: number;
+  maxContextChars?: number;
+  collectionName?: string;
+  maxHistoryTurns?: number;
+  enableQueryCondensation?: boolean;
 }
 
 export interface GenerateChatResponseResult {
   text: string;
   model: string;
   durationMs: number;
+  sources?: RagSourceReference[];
+  isRagGrounded?: boolean;
+  retrievalDurationMs?: number;
+  generationDurationMs?: number;
+  condensedQuestion?: string;
+  condensationDurationMs?: number;
 }
+

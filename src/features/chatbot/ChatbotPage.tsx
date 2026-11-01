@@ -121,6 +121,8 @@ export const ChatbotPage: React.FC<ChatbotPageProps> = ({ user, subjects }) => {
         margin: '0 auto',
         padding: '10px clamp(10px, 2vw, 20px) 12px',
         height: '100%',
+        flex: '1 1 0%',
+        minHeight: 0,
         display: 'flex',
         flexDirection: 'column',
         boxSizing: 'border-box',

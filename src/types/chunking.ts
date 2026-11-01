@@ -16,10 +16,13 @@ export interface ChunkMetadata {
   resourceId?: string;
   resourceName?: string;
   pageNumber?: number;
+  pageEndNumber?: number;
+  pageRange?: string;
   tokenCount: number;
   characterCount: number;
   extractionMethod?: 'text' | 'ocr' | 'web' | 'unknown';
   isScanned?: boolean;
+  embeddingVersion?: string;
   extra?: Record<string, unknown>;
 }
 
@@ -36,6 +39,8 @@ export interface TextChunk {
   resourceId?: string;
   resourceName?: string;
   pageNumber?: number;
+  pageEndNumber?: number;
+  pageRange?: string;
   totalChunks: number;
   tokenCount: number;
   characterCount: number;
@@ -95,6 +100,8 @@ export interface DocumentChunkInput {
   resourceId?: string;
   resourceName?: string;
   pageNumber?: number;
+  pageEndNumber?: number;
+  pageRange?: string;
   extractionMethod?: 'text' | 'ocr' | 'web' | 'unknown';
   isScanned?: boolean;
 }

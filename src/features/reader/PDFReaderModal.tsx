@@ -16,12 +16,14 @@ import { getFileObjectUrl } from '../../services/fileStorageService';
 interface PDFReaderModalProps {
   isOpen: boolean;
   resource: StudyResource | null;
+  initialPage?: number;
   onClose: () => void;
 }
 
 export const PDFReaderModal: React.FC<PDFReaderModalProps> = ({
   isOpen,
   resource,
+  initialPage,
   onClose,
 }) => {
   const [zoomLevel, setZoomLevel] = useState<number>(100);
@@ -63,9 +65,10 @@ export const PDFReaderModal: React.FC<PDFReaderModalProps> = ({
 
   // Construct viewer URL
   const currentUrl = activeUrl || resource.url;
+  const pageFragment = initialPage && initialPage > 0 ? `page=${initialPage}&` : '';
   const viewerUrl = currentUrl.includes('#')
     ? currentUrl
-    : `${currentUrl}#view=FitH&toolbar=1&navpanes=1`;
+    : `${currentUrl}#${pageFragment}view=FitH&toolbar=1&navpanes=1`;
 
   return (
     <div

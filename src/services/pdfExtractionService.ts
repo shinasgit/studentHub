@@ -54,9 +54,20 @@ export const resolvePdfArrayBuffer = async (
     url?: string | null;
     fileBlob?: Blob | null;
     fileName?: string | null;
+    arrayBuffer?: ArrayBuffer | Uint8Array | null;
   }
 ): Promise<{ buffer: ArrayBuffer; fileName: string }> => {
   const targetName = source.fileName || 'document.pdf';
+
+  // 0. Direct ArrayBuffer or Uint8Array
+  if (source.arrayBuffer) {
+    const raw = source.arrayBuffer;
+    const buf =
+      raw instanceof Uint8Array
+        ? (raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer)
+        : raw;
+    return { buffer: buf, fileName: targetName };
+  }
 
   // 1. Direct Blob (e.g. from local file drop)
   if (source.fileBlob) {
@@ -64,8 +75,8 @@ export const resolvePdfArrayBuffer = async (
     return { buffer, fileName: (source.fileBlob as File).name || targetName };
   }
 
-  // 2. Storage key lookup in local IndexedDB vault
-  if (source.storageKey) {
+  // 2. Storage key lookup in local IndexedDB vault (browser only)
+  if (source.storageKey && typeof window !== 'undefined') {
     try {
       const blob = await getFileFromVault(source.storageKey);
       if (blob) {
@@ -77,8 +88,8 @@ export const resolvePdfArrayBuffer = async (
     }
   }
 
-  // 2b. Fallback: Search IndexedDB vault by file name if storageKey was lost/not found
-  if (source.fileName) {
+  // 2b. Fallback: Search IndexedDB vault by file name if storageKey was lost/not found (browser only)
+  if (source.fileName && typeof window !== 'undefined') {
     try {
       const match = await findFileInVaultByName(source.fileName);
       if (match) {
@@ -209,7 +220,7 @@ const extractPageNativeText = async (page: pdfjsLib.PDFPageProxy): Promise<strin
  * 4. Merges results preserving page order.
  */
 export const extractTextFromPdf = async (
-  arrayBuffer: ArrayBuffer,
+  arrayBuffer: ArrayBuffer | Uint8Array,
   fileName: string,
   options: ExtractionOptions = {}
 ): Promise<PdfExtractionResult> => {
@@ -230,9 +241,21 @@ export const extractTextFromPdf = async (
 
   let pdfDoc: pdfjsLib.PDFDocumentProxy;
   try {
-    const loadingTask = pdfjsLib.getDocument({
-      data: new Uint8Array(arrayBuffer),
-      useWorkerFetch: true,
+    const uint8 =
+      arrayBuffer instanceof Uint8Array
+        ? new Uint8Array(arrayBuffer.buffer, arrayBuffer.byteOffset, arrayBuffer.byteLength)
+        : new Uint8Array(arrayBuffer);
+
+    // In Node.js environment (e.g. CLI, tests), use legacy build to avoid worker thread issues
+    const activePdfLib =
+      typeof window === 'undefined'
+        ? ((await import('pdfjs-dist/legacy/build/pdf.mjs')) as unknown as typeof pdfjsLib)
+        : pdfjsLib;
+
+    const loadingTask = activePdfLib.getDocument({
+      data: uint8,
+      useWorkerFetch: typeof window !== 'undefined',
+      useSystemFonts: true,
     });
 
     if (abortSignal) {
@@ -315,8 +338,8 @@ export const extractTextFromPdf = async (
   const isPartiallyScanned = pagesNeedingOcr.length > 0 && pagesNeedingOcr.length < totalPages;
   let ocrPerformed = false;
 
-  // Stage 2: OCR for Scanned or Low-Text Pages
-  if (enableOcr && pagesNeedingOcr.length > 0) {
+  // Stage 2: OCR for Scanned or Low-Text Pages (requires browser DOM canvas)
+  if (enableOcr && pagesNeedingOcr.length > 0 && typeof document !== 'undefined') {
     onProgress?.({
       stage: 'detecting_ocr',
       currentPage: pagesNeedingOcr[0],

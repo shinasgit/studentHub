@@ -55,11 +55,14 @@ export interface ChromaVectorMetadata {
   resourceId: string;
   resourceName: string;
   pageNumber: number;
+  pageEndNumber?: number;
+  pageRange?: string;
   chunkIndex: number;
   totalChunks: number;
   tokenCount: number;
   characterCount: number;
   studentId?: string;
+  embeddingVersion?: string;
   [key: string]: string | number | boolean | undefined;
 }
 
@@ -103,5 +106,26 @@ export interface ChromaFilterCriteria {
   studentId?: string;
   subjectId?: string;
   moduleId?: string;
+  moduleIds?: string[];
   resourceId?: string;
 }
+
+/**
+ * Configuration options for querying similar chunks in ChromaDB.
+ */
+export interface ChromaQueryOptions extends ChromaStorageOptions {
+  topK?: number;
+  filter?: ChromaFilterCriteria;
+  where?: Record<string, unknown>;
+}
+
+/**
+ * Result item returned from vector similarity query.
+ */
+export interface ChromaQueryResultItem {
+  id: string;
+  text: string;
+  metadata: ChromaVectorMetadata;
+  distance: number;
+}
+

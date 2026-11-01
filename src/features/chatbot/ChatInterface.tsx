@@ -23,10 +23,14 @@ import {
   Search,
   MessageSquare,
   Clock,
+  FileText,
+  CheckCircle2,
 } from 'lucide-react';
 import { Button } from '../../components/common/Button';
 import type { Subject } from '../../types/subject';
 import type { ChatStudyScope, ChatMessage, ChatSession } from '../../types/chat';
+import type { RagSourceReference } from '../../types/rag';
+import type { StudyResource } from '../../types/resource';
 import type { OllamaErrorInfo } from '../../types/ollama';
 import {
   generateChatResponse,
@@ -35,9 +39,11 @@ import {
   getConversations,
   deleteConversation,
 } from '../../services/chatService';
+import { getResourceById } from '../../services/resourceService';
 import { getSelectedModel, parseOllamaError } from '../../services/ollamaService';
 import { ChatMessageContent } from './ChatMessageContent';
 import { ChatScopeModal } from './ChatScopeModal';
+import { PDFReaderModal } from '../reader/PDFReaderModal';
 
 interface ChatInterfaceProps {
   user: User;
@@ -86,6 +92,41 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   // Scope Modal state
   const [isScopeModalOpen, setIsScopeModalOpen] = useState(false);
+
+  // PDF Viewer Modal for clickable source references
+  const [activePdfResource, setActivePdfResource] = useState<StudyResource | null>(null);
+  const [activePdfPage, setActivePdfPage] = useState<number | undefined>(undefined);
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
+
+  const handleOpenSourceReference = async (source: RagSourceReference) => {
+    try {
+      const existing = await getResourceById(user.uid, source.resourceId);
+      if (existing) {
+        setActivePdfResource(existing);
+        setActivePdfPage(source.pageNumber);
+        setIsPdfModalOpen(true);
+        return;
+      }
+    } catch (err) {
+      console.warn('Could not fetch study resource document:', err);
+    }
+
+    const fallbackResource: StudyResource = {
+      id: source.resourceId,
+      userId: user.uid,
+      subjectId: source.subjectId || scope.subjectId || '',
+      moduleId: source.moduleId || null,
+      title: source.resourceName,
+      type: 'pdf',
+      url: '',
+      fileStorageKey: source.resourceId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    setActivePdfResource(fallbackResource);
+    setActivePdfPage(source.pageNumber);
+    setIsPdfModalOpen(true);
+  };
 
   // AbortController for cancel / stop generation
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -225,10 +266,11 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     abortControllerRef.current = controller;
 
     try {
-      // 2. Request real response from Ollama
+      // 2. Request real response from Ollama (with RAG retrieval enabled)
       const result = await generateChatResponse({
         messages: updatedWithUser,
         scope,
+        studentId: user.uid,
         abortSignal: controller.signal,
       });
 
@@ -239,6 +281,12 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         timestamp: new Date().toISOString(),
         modelUsed: result.model,
         durationMs: result.durationMs,
+        sources: result.sources,
+        isRagGrounded: result.isRagGrounded,
+        retrievalDurationMs: result.retrievalDurationMs,
+        generationDurationMs: result.generationDurationMs,
+        condensedQuestion: result.condensedQuestion,
+        condensationDurationMs: result.condensationDurationMs,
       };
 
       const finalMessages = [...updatedWithUser, assistantMsg];
@@ -300,6 +348,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       const result = await generateChatResponse({
         messages: historyUpToUser,
         scope,
+        studentId: user.uid,
         abortSignal: controller.signal,
       });
 
@@ -310,6 +359,12 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         timestamp: new Date().toISOString(),
         modelUsed: result.model,
         durationMs: result.durationMs,
+        sources: result.sources,
+        isRagGrounded: result.isRagGrounded,
+        retrievalDurationMs: result.retrievalDurationMs,
+        generationDurationMs: result.generationDurationMs,
+        condensedQuestion: result.condensedQuestion,
+        condensationDurationMs: result.condensationDurationMs,
       };
 
       const finalMessages = [...historyUpToUser, newAssistantMsg];
@@ -453,6 +508,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
+        minHeight: 0,
+        flex: '1 1 0%',
         width: '100%',
         overflow: 'hidden',
         background: 'var(--bg-card)',
@@ -661,7 +718,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         ref={conversationContainerRef}
         className="chatbot-scroll-area"
         style={{
-          flex: 1,
+          flex: '1 1 0%',
+          minHeight: 0,
           overflowY: 'auto',
           overflowX: 'hidden',
           display: 'flex',
@@ -962,6 +1020,135 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                         <ChatMessageContent content={msg.content} isUser={false} />
                       </div>
 
+                      {/* RAG Source References */}
+                      {msg.sources && msg.sources.length > 0 && (
+                        <div
+                          style={{
+                            marginTop: '12px',
+                            padding: '10px 14px',
+                            borderRadius: 'var(--radius-md)',
+                            background: 'var(--bg-secondary)',
+                            border: '1px solid var(--border-subtle)',
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              marginBottom: '8px',
+                              flexWrap: 'wrap',
+                              gap: '6px',
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                fontSize: '0.72rem',
+                                fontWeight: 700,
+                                color: 'var(--color-success)',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.04em',
+                              }}
+                            >
+                              <CheckCircle2 size={13} />
+                              <span>Grounded in Study Materials</span>
+                            </div>
+
+                            <span
+                              style={{
+                                fontSize: '0.68rem',
+                                color: 'var(--text-muted)',
+                              }}
+                            >
+                              {msg.sources.length} {msg.sources.length === 1 ? 'citation' : 'citations'}
+                            </span>
+                          </div>
+
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: '6px',
+                            }}
+                          >
+                            {msg.sources.map((src, srcIdx) => (
+                              <button
+                                key={`${src.chunkId || src.resourceId}-${srcIdx}`}
+                                type="button"
+                                onClick={() => handleOpenSourceReference(src)}
+                                title={`Click to open ${src.resourceName} at ${src.pageEndNumber && src.pageEndNumber > src.pageNumber ? `Pages ${src.pageNumber}–${src.pageEndNumber}` : `Page ${src.pageNumber}`}`}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  padding: '4px 10px',
+                                  borderRadius: 'var(--radius-sm)',
+                                  background: 'var(--bg-tertiary)',
+                                  border: '1px solid var(--border-subtle)',
+                                  color: 'var(--text-secondary)',
+                                  fontSize: '0.74rem',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                  maxWidth: '100%',
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.borderColor = 'var(--accent-primary)';
+                                  e.currentTarget.style.color = 'var(--accent-primary)';
+                                  e.currentTarget.style.background = 'var(--accent-primary-subtle)';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                                  e.currentTarget.style.color = 'var(--text-secondary)';
+                                  e.currentTarget.style.background = 'var(--bg-tertiary)';
+                                }}
+                              >
+                                <FileText size={13} style={{ color: '#ef4444', flexShrink: 0 }} />
+                                <span
+                                  style={{
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                    fontWeight: 600,
+                                    maxWidth: '220px',
+                                  }}
+                                >
+                                  {src.resourceName}
+                                </span>
+                                <span
+                                  style={{
+                                    padding: '1px 5px',
+                                    borderRadius: '3px',
+                                    background: 'var(--bg-secondary)',
+                                    border: '1px solid var(--border-subtle)',
+                                    fontSize: '0.68rem',
+                                    fontWeight: 700,
+                                    color: 'var(--text-primary)',
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {src.pageEndNumber && src.pageEndNumber > src.pageNumber
+                                    ? `pp. ${src.pageNumber}–${src.pageEndNumber}`
+                                    : `p. ${src.pageNumber}`}
+                                </span>
+                                <span
+                                  style={{
+                                    fontSize: '0.68rem',
+                                    color: 'var(--color-success)',
+                                    fontWeight: 700,
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {Math.round(src.similarity * 100)}%
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Subtle Action Row below message */}
                       <div
                         style={{
@@ -973,6 +1160,37 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                           color: 'var(--text-muted)',
                         }}
                       >
+                        {msg.isRagGrounded && (
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px',
+                              color: 'var(--color-success)',
+                              fontWeight: 600,
+                            }}
+                          >
+                            <CheckCircle2 size={11} />
+                            Study Material Grounded
+                          </span>
+                        )}
+
+                        {msg.condensedQuestion && (
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px',
+                              color: 'var(--accent-primary)',
+                              fontSize: '0.70rem',
+                              fontWeight: 500,
+                            }}
+                            title={`Follow-up query condensed to: "${msg.condensedQuestion}"`}
+                          >
+                            Context-aware follow-up
+                          </span>
+                        )}
+
                         {msg.durationMs && (
                           <span>{(msg.durationMs / 1000).toFixed(1)}s</span>
                         )}
@@ -1072,7 +1290,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                       <span className="dot" />
                     </span>
 
-                    <span>Thinking with Llama 3.2 3B...</span>
+                    <span>Searching study materials &amp; generating answer...</span>
 
                     <button
                       type="button"
@@ -1113,6 +1331,9 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         className="chatbot-docked-composer"
         style={{
           flexShrink: 0,
+          marginTop: 'auto',
+          width: '100%',
+          boxSizing: 'border-box',
           background: 'var(--bg-secondary)',
           borderTop: '1px solid var(--border-subtle)',
           padding: '12px clamp(12px, 2.5vw, 24px) 12px',
@@ -1500,6 +1721,20 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
           if (messages.length === 0) {
             handleNewChat();
           }
+        }}
+      />
+
+      {/* ========================================================= */}
+      {/* 6. Built-in PDF Reader Modal for Source References        */}
+      {/* ========================================================= */}
+      <PDFReaderModal
+        isOpen={isPdfModalOpen}
+        resource={activePdfResource}
+        initialPage={activePdfPage}
+        onClose={() => {
+          setIsPdfModalOpen(false);
+          setActivePdfResource(null);
+          setActivePdfPage(undefined);
         }}
       />
     </div>

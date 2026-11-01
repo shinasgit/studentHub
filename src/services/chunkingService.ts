@@ -169,8 +169,21 @@ const buildRawChunksFromUnits = (
   const rawChunks: Array<{
     text: string;
     pageNumber?: number;
+    pageEndNumber?: number;
+    pageRange?: string;
     tokenCount: number;
   }> = [];
+
+  const getUnitPageInfo = (uList: typeof cleanUnits) => {
+    const startPage = uList[0]?.pageNumber;
+    const endPage = uList[uList.length - 1]?.pageNumber;
+    const isMulti = typeof startPage === 'number' && typeof endPage === 'number' && endPage > startPage;
+    return {
+      pageNumber: startPage,
+      pageEndNumber: endPage ?? startPage,
+      pageRange: isMulti ? `${startPage}–${endPage}` : undefined,
+    };
+  };
 
   let currentUnits: typeof cleanUnits = [];
   let currentTokens = 0;
@@ -185,9 +198,12 @@ const buildRawChunksFromUnits = (
       // First flush whatever we currently have accumulated
       if (currentUnits.length > 0) {
         const chunkText = currentUnits.map((u) => u.text).join('\n\n');
+        const pageInfo = getUnitPageInfo(currentUnits);
         rawChunks.push({
           text: chunkText,
-          pageNumber: currentUnits[0].pageNumber,
+          pageNumber: pageInfo.pageNumber,
+          pageEndNumber: pageInfo.pageEndNumber,
+          pageRange: pageInfo.pageRange,
           tokenCount: tokenCounter(chunkText),
         });
         currentUnits = [];
@@ -256,9 +272,12 @@ const buildRawChunksFromUnits = (
     } else {
       // Current chunk is full! Finalize it.
       const chunkText = currentUnits.map((u) => u.text).join('\n\n');
+      const pageInfo = getUnitPageInfo(currentUnits);
       rawChunks.push({
         text: chunkText,
-        pageNumber: currentUnits[0].pageNumber,
+        pageNumber: pageInfo.pageNumber,
+        pageEndNumber: pageInfo.pageEndNumber,
+        pageRange: pageInfo.pageRange,
         tokenCount: tokenCounter(chunkText),
       });
 
@@ -299,9 +318,12 @@ const buildRawChunksFromUnits = (
       prev.text = mergedText;
       prev.tokenCount = tokenCounter(mergedText);
     } else {
+      const pageInfo = getUnitPageInfo(currentUnits);
       rawChunks.push({
         text: chunkText,
-        pageNumber: currentUnits[0].pageNumber,
+        pageNumber: pageInfo.pageNumber,
+        pageEndNumber: pageInfo.pageEndNumber,
+        pageRange: pageInfo.pageRange,
         tokenCount: chunkTokens,
       });
     }
@@ -347,16 +369,25 @@ export const chunkDocument = (
   const config = resolveChunkingConfig(userConfig);
 
   const baseMetadata: Partial<ChunkMetadata> = {
+    studentId: input.studentId,
     subjectId: input.subjectId,
     moduleId: input.moduleId,
     resourceId: input.resourceId,
     resourceName: input.resourceName || input.pdfResult?.fileName,
     pageNumber: input.pageNumber,
+    pageEndNumber: input.pageEndNumber,
+    pageRange: input.pageRange,
     extractionMethod: input.extractionMethod,
     isScanned: input.isScanned || input.pdfResult?.isScanned,
   };
 
-  const allRawChunks: Array<{ text: string; pageNumber?: number; tokenCount: number }> = [];
+  const allRawChunks: Array<{
+    text: string;
+    pageNumber?: number;
+    pageEndNumber?: number;
+    pageRange?: string;
+    tokenCount: number;
+  }> = [];
 
   // --- Scenario A: Input has structured pages (from extractTextFromPdf) ---
   const pages: PageExtractionResult[] = input.pages || input.pdfResult?.pages || [];
@@ -471,16 +502,22 @@ export const chunkDocument = (
   const chunks: TextChunk[] = allRawChunks.map((c, index) => {
     const chunkId = `${docPrefix}_chunk_${index}`;
     const pageNum = c.pageNumber ?? baseMetadata.pageNumber;
+    const pageEndNum = c.pageEndNumber ?? baseMetadata.pageEndNumber ?? pageNum;
+    const isMulti = typeof pageNum === 'number' && typeof pageEndNum === 'number' && pageEndNum > pageNum;
+    const pageRange = c.pageRange || (isMulti ? `${pageNum}–${pageEndNum}` : undefined);
 
     const metadata: ChunkMetadata = {
       chunkId,
       chunkIndex: index,
       totalChunks,
+      studentId: baseMetadata.studentId,
       subjectId: baseMetadata.subjectId,
       moduleId: baseMetadata.moduleId,
       resourceId: baseMetadata.resourceId,
       resourceName: baseMetadata.resourceName,
       pageNumber: pageNum,
+      pageEndNumber: pageEndNum,
+      pageRange,
       tokenCount: c.tokenCount,
       characterCount: c.text.length,
       extractionMethod: baseMetadata.extractionMethod || 'text',
@@ -491,11 +528,14 @@ export const chunkDocument = (
       chunkId,
       chunkIndex: index,
       text: c.text,
+      studentId: metadata.studentId,
       subjectId: metadata.subjectId,
       moduleId: metadata.moduleId,
       resourceId: metadata.resourceId,
       resourceName: metadata.resourceName,
       pageNumber: metadata.pageNumber,
+      pageEndNumber: metadata.pageEndNumber,
+      pageRange: metadata.pageRange,
       totalChunks,
       tokenCount: c.tokenCount,
       characterCount: c.text.length,

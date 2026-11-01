@@ -9,6 +9,7 @@ import {
   query,
   orderBy,
   where,
+  getDoc,
   Timestamp,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -163,4 +164,34 @@ export const deleteResource = async (
 ): Promise<void> => {
   const resourceDocRef = doc(db, 'users', userId, 'resources', resourceId);
   await deleteDoc(resourceDocRef);
+};
+
+export const getResourceById = async (
+  userId: string,
+  resourceId: string
+): Promise<StudyResource | null> => {
+  if (!userId || !resourceId) return null;
+  try {
+    const resourceDocRef = doc(db, 'users', userId, 'resources', resourceId);
+    const snap = await getDoc(resourceDocRef);
+    if (!snap.exists()) return null;
+    const data = snap.data();
+    return {
+      id: snap.id,
+      userId,
+      subjectId: data.subjectId || '',
+      moduleId: data.moduleId || null,
+      title: data.title || '',
+      type: data.type || 'pdf',
+      url: data.url || '',
+      description: data.description || '',
+      fileSize: data.fileSize || null,
+      fileStorageKey: data.fileStorageKey || null,
+      createdAt: formatTimestamp(data.createdAt),
+      updatedAt: formatTimestamp(data.updatedAt),
+    };
+  } catch (err) {
+    console.warn('Could not fetch resource by ID:', err);
+    return null;
+  }
 };

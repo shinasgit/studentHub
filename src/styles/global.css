@@ -971,6 +971,45 @@ code, pre { font-family: var(--font-mono); }
   }
 }
 
+/* ============================================================
+   CHATBOT FULL-HEIGHT FIXED BOTTOM DOCKED INPUT LAYOUT
+   ============================================================ */
+.chatbot-page-wrapper {
+  flex: 1 1 0% !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+}
+
+.chatbot-card-container {
+  flex: 1 1 0% !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  position: relative !important;
+}
+
+.chatbot-scroll-area {
+  flex: 1 1 0% !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.chatbot-docked-composer {
+  flex-shrink: 0 !important;
+  margin-top: auto !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
 @media (max-width: 640px) {
   .hide-mobile {
     display: none !important;
