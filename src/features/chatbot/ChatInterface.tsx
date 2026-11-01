@@ -39,11 +39,11 @@ import {
   getConversations,
   deleteConversation,
 } from '../../services/chatService';
-import { getResourceById } from '../../services/resourceService';
+import { resolveCitationNavigation } from '../../services/citationService';
 import { getSelectedModel, parseOllamaError } from '../../services/ollamaService';
 import { ChatMessageContent } from './ChatMessageContent';
 import { ChatScopeModal } from './ChatScopeModal';
-import { PDFReaderModal } from '../reader/PDFReaderModal';
+import { PDFReaderModal, type PDFReaderErrorState } from '../reader/PDFReaderModal';
 
 interface ChatInterfaceProps {
   user: User;
@@ -96,36 +96,72 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   // PDF Viewer Modal for clickable source references
   const [activePdfResource, setActivePdfResource] = useState<StudyResource | null>(null);
   const [activePdfPage, setActivePdfPage] = useState<number | undefined>(undefined);
+  const [activePdfPageEnd, setActivePdfPageEnd] = useState<number | undefined>(undefined);
+  const [activePdfPageRange, setActivePdfPageRange] = useState<string | undefined>(undefined);
+  const [readerError, setReaderError] = useState<PDFReaderErrorState | null>(null);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
 
   const handleOpenSourceReference = async (source: RagSourceReference) => {
     try {
-      const existing = await getResourceById(user.uid, source.resourceId);
-      if (existing) {
-        setActivePdfResource(existing);
-        setActivePdfPage(source.pageNumber);
+      const resolution = await resolveCitationNavigation(user.uid, source);
+
+      if (resolution.status === 'ready') {
+        setActivePdfResource(resolution.resource);
+        setActivePdfPage(resolution.pageNumber);
+        setActivePdfPageEnd(resolution.pageEndNumber);
+        setActivePdfPageRange(resolution.pageRange);
+        setReaderError(null);
         setIsPdfModalOpen(true);
         return;
       }
-    } catch (err) {
-      console.warn('Could not fetch study resource document:', err);
-    }
 
-    const fallbackResource: StudyResource = {
-      id: source.resourceId,
-      userId: user.uid,
-      subjectId: source.subjectId || scope.subjectId || '',
-      moduleId: source.moduleId || null,
-      title: source.resourceName,
-      type: 'pdf',
-      url: '',
-      fileStorageKey: source.resourceId,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    setActivePdfResource(fallbackResource);
-    setActivePdfPage(source.pageNumber);
-    setIsPdfModalOpen(true);
+      // Handled error state (deleted resource, missing_url, invalid_citation, inaccessible)
+      const fallbackResource: StudyResource = resolution.resource || {
+        id: source.resourceId || 'unknown',
+        userId: user.uid,
+        subjectId: source.subjectId || scope.subjectId || '',
+        moduleId: source.moduleId || null,
+        title: source.resourceName || 'Unknown Document',
+        type: 'pdf',
+        url: '',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      setActivePdfResource(fallbackResource);
+      setActivePdfPage(resolution.pageNumber);
+      setActivePdfPageEnd(resolution.pageEndNumber);
+      setActivePdfPageRange(resolution.pageRange);
+      setReaderError({
+        type: resolution.status,
+        title: resolution.errorTitle || 'Document Unavailable',
+        message: resolution.errorMessage || 'Unable to open the cited PDF document.',
+      });
+      setIsPdfModalOpen(true);
+    } catch (err) {
+      console.error('Unhandled error during citation navigation:', err);
+      const fallbackResource: StudyResource = {
+        id: source.resourceId || 'unknown',
+        userId: user.uid,
+        subjectId: source.subjectId || scope.subjectId || '',
+        moduleId: source.moduleId || null,
+        title: source.resourceName || 'Unknown Document',
+        type: 'pdf',
+        url: '',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      setActivePdfResource(fallbackResource);
+      setActivePdfPage(source.pageNumber || 1);
+      setActivePdfPageEnd(source.pageEndNumber);
+      setActivePdfPageRange(source.pageRange);
+      setReaderError({
+        type: 'error',
+        title: 'Unable to Open Document',
+        message: 'An unexpected error occurred while resolving this document citation.',
+      });
+      setIsPdfModalOpen(true);
+    }
   };
 
   // AbortController for cancel / stop generation
@@ -171,6 +207,16 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, isSending]);
+
+  // Abort active controller on component unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+    };
+  }, []);
 
   // Auto-grow textarea
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -231,7 +277,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setIsSending(false);
   };
 
-  // Send message to local Ollama LLM
+  // Send message to local Ollama LLM (with progressive streaming and cancellation)
   const handleSendMessage = async (textToSend?: string) => {
     const rawText = textToSend !== undefined ? textToSend : inputValue;
     const cleanText = rawText.trim();
@@ -258,26 +304,71 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       timestamp: new Date().toISOString(),
     };
 
+    const assistantMsgId = `asst-${Date.now() + 1}`;
+    let accumulatedText = '';
+
+    // Create streaming assistant message placeholder
+    const placeholderAssistantMsg: ChatMessage = {
+      id: assistantMsgId,
+      sender: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+      isStreaming: true,
+    };
+
     const updatedWithUser = [...messages, userMsg];
-    setMessages(updatedWithUser);
+    setMessages([...updatedWithUser, placeholderAssistantMsg]);
     setIsSending(true);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
     try {
-      // 2. Request real response from Ollama (with RAG retrieval enabled)
+      // 2. Request real response from Ollama with progressive streaming enabled
       const result = await generateChatResponse({
         messages: updatedWithUser,
         scope,
         studentId: user.uid,
         abortSignal: controller.signal,
+        stream: true,
+        onChunk: (_chunk, accumulated) => {
+          accumulatedText = accumulated;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? { ...m, content: accumulated, isStreaming: true }
+                : m
+            )
+          );
+        },
       });
 
+      if (result.isCancelled || controller.signal.aborted) {
+        const finalContent = accumulatedText
+          ? `${accumulatedText}\n\n*[Generation stopped by student]*`
+          : '*(Generation stopped)*';
+
+        const cancelledMsg: ChatMessage = {
+          id: assistantMsgId,
+          sender: 'assistant',
+          content: finalContent,
+          timestamp: new Date().toISOString(),
+          modelUsed: result.model || activeModel,
+          durationMs: result.durationMs,
+          isStreaming: false,
+          isCancelled: true,
+        };
+
+        const finalMessages = [...updatedWithUser, cancelledMsg];
+        setMessages(finalMessages);
+        await persistConversation(finalMessages, sessionId, cleanText);
+        return;
+      }
+
       const assistantMsg: ChatMessage = {
-        id: `asst-${Date.now()}`,
+        id: assistantMsgId,
         sender: 'assistant',
-        content: result.text,
+        content: result.text || accumulatedText,
         timestamp: new Date().toISOString(),
         modelUsed: result.model,
         durationMs: result.durationMs,
@@ -287,6 +378,9 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         generationDurationMs: result.generationDurationMs,
         condensedQuestion: result.condensedQuestion,
         condensationDurationMs: result.condensationDurationMs,
+        timeToFirstTokenMs: result.timeToFirstTokenMs,
+        isStreaming: false,
+        isCancelled: false,
       };
 
       const finalMessages = [...updatedWithUser, assistantMsg];
@@ -296,6 +390,22 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       await persistConversation(finalMessages, sessionId, cleanText);
     } catch (err: unknown) {
       if (controller.signal.aborted) {
+        if (accumulatedText) {
+          const cancelledMsg: ChatMessage = {
+            id: assistantMsgId,
+            sender: 'assistant',
+            content: `${accumulatedText}\n\n*[Generation stopped by student]*`,
+            timestamp: new Date().toISOString(),
+            isCancelled: true,
+            isStreaming: false,
+            modelUsed: activeModel,
+          };
+          const finalMessages = [...updatedWithUser, cancelledMsg];
+          setMessages(finalMessages);
+          await persistConversation(finalMessages, sessionId, cleanText);
+        } else {
+          setMessages(updatedWithUser);
+        }
         return;
       }
 
@@ -311,7 +421,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         isError: true,
       };
 
-      setMessages((prev) => [...prev, errorMsg]);
+      setMessages([...updatedWithUser, errorMsg]);
     } finally {
       setIsSending(false);
       abortControllerRef.current = null;
@@ -321,7 +431,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
-  // Regenerate last response
+  // Regenerate last response with streaming support
   const handleRegenerate = async () => {
     if (isSending) return;
 
@@ -337,8 +447,18 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
     const historyUpToUser = messages.slice(0, lastUserIndex + 1);
     const lastUserPrompt = messages[lastUserIndex].content;
+    const assistantMsgId = `asst-${Date.now()}`;
+    let accumulatedText = '';
 
-    setMessages(historyUpToUser);
+    const placeholderAssistantMsg: ChatMessage = {
+      id: assistantMsgId,
+      sender: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+      isStreaming: true,
+    };
+
+    setMessages([...historyUpToUser, placeholderAssistantMsg]);
     setIsSending(true);
 
     const controller = new AbortController();
@@ -350,12 +470,45 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         scope,
         studentId: user.uid,
         abortSignal: controller.signal,
+        stream: true,
+        onChunk: (_chunk, accumulated) => {
+          accumulatedText = accumulated;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? { ...m, content: accumulated, isStreaming: true }
+                : m
+            )
+          );
+        },
       });
 
+      if (result.isCancelled || controller.signal.aborted) {
+        const finalContent = accumulatedText
+          ? `${accumulatedText}\n\n*[Generation stopped by student]*`
+          : '*(Generation stopped)*';
+
+        const cancelledMsg: ChatMessage = {
+          id: assistantMsgId,
+          sender: 'assistant',
+          content: finalContent,
+          timestamp: new Date().toISOString(),
+          modelUsed: result.model || activeModel,
+          durationMs: result.durationMs,
+          isStreaming: false,
+          isCancelled: true,
+        };
+
+        const finalMessages = [...historyUpToUser, cancelledMsg];
+        setMessages(finalMessages);
+        await persistConversation(finalMessages, sessionId, lastUserPrompt);
+        return;
+      }
+
       const newAssistantMsg: ChatMessage = {
-        id: `asst-${Date.now()}`,
+        id: assistantMsgId,
         sender: 'assistant',
-        content: result.text,
+        content: result.text || accumulatedText,
         timestamp: new Date().toISOString(),
         modelUsed: result.model,
         durationMs: result.durationMs,
@@ -365,6 +518,9 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         generationDurationMs: result.generationDurationMs,
         condensedQuestion: result.condensedQuestion,
         condensationDurationMs: result.condensationDurationMs,
+        timeToFirstTokenMs: result.timeToFirstTokenMs,
+        isStreaming: false,
+        isCancelled: false,
       };
 
       const finalMessages = [...historyUpToUser, newAssistantMsg];
@@ -372,7 +528,25 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
       await persistConversation(finalMessages, sessionId, lastUserPrompt);
     } catch (err: unknown) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        if (accumulatedText) {
+          const cancelledMsg: ChatMessage = {
+            id: assistantMsgId,
+            sender: 'assistant',
+            content: `${accumulatedText}\n\n*[Generation stopped by student]*`,
+            timestamp: new Date().toISOString(),
+            isCancelled: true,
+            isStreaming: false,
+            modelUsed: activeModel,
+          };
+          const finalMessages = [...historyUpToUser, cancelledMsg];
+          setMessages(finalMessages);
+          await persistConversation(finalMessages, sessionId, lastUserPrompt);
+        } else {
+          setMessages(historyUpToUser);
+        }
+        return;
+      }
 
       const errorInfo =
         (err as { info?: OllamaErrorInfo }).info ||
@@ -386,7 +560,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         isError: true,
       };
 
-      setMessages((prev) => [...prev, errorMsg]);
+      setMessages([...historyUpToUser, errorMsg]);
     } finally {
       setIsSending(false);
       abortControllerRef.current = null;
@@ -1017,7 +1191,42 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                           lineHeight: 1.65,
                         }}
                       >
-                        <ChatMessageContent content={msg.content} isUser={false} />
+                        {!msg.content && msg.isStreaming ? (
+                          <div
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              color: 'var(--text-secondary)',
+                              padding: '2px 0',
+                            }}
+                          >
+                            <span className="typing-dots">
+                              <span className="dot" />
+                              <span className="dot" />
+                              <span className="dot" />
+                            </span>
+                            <span style={{ fontSize: '0.86rem' }}>Searching study materials &amp; generating answer...</span>
+                          </div>
+                        ) : (
+                          <>
+                            <ChatMessageContent content={msg.content} isUser={false} />
+                            {msg.isStreaming && (
+                              <span
+                                style={{
+                                  display: 'inline-block',
+                                  width: '8px',
+                                  height: '15px',
+                                  marginLeft: '4px',
+                                  background: 'var(--accent-primary)',
+                                  verticalAlign: 'text-bottom',
+                                  borderRadius: '1px',
+                                  animation: 'pulse 1s infinite',
+                                }}
+                              />
+                            )}
+                          </>
+                        )}
                       </div>
 
                       {/* RAG Source References */}
@@ -1191,52 +1400,83 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                           </span>
                         )}
 
+                        {msg.isCancelled && (
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px',
+                              color: 'var(--color-warning)',
+                              fontSize: '0.70rem',
+                              fontWeight: 600,
+                            }}
+                          >
+                            Cancelled
+                          </span>
+                        )}
+
+                        {msg.timeToFirstTokenMs !== undefined && (
+                          <span
+                            style={{
+                              fontSize: '0.68rem',
+                              color: 'var(--text-muted)',
+                            }}
+                            title={`First streamed token in ${msg.timeToFirstTokenMs}ms`}
+                          >
+                            TTFT {(msg.timeToFirstTokenMs / 1000).toFixed(2)}s
+                          </span>
+                        )}
+
                         {msg.durationMs && (
                           <span>{(msg.durationMs / 1000).toFixed(1)}s</span>
                         )}
 
-                        <button
-                          type="button"
-                          onClick={() => handleCopy(msg.id, msg.content)}
-                          style={{
-                            background: 'transparent',
-                            border: 'none',
-                            color: copiedMessageId === msg.id ? 'var(--color-success)' : 'var(--text-muted)',
-                            fontSize: '0.72rem',
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            padding: '2px 4px',
-                            borderRadius: 'var(--radius-xs)',
-                          }}
-                          title="Copy message to clipboard"
-                        >
-                          {copiedMessageId === msg.id ? <Check size={12} /> : <Copy size={12} />}
-                          <span>{copiedMessageId === msg.id ? 'Copied' : 'Copy'}</span>
-                        </button>
+                        {!msg.isStreaming && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleCopy(msg.id, msg.content)}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: copiedMessageId === msg.id ? 'var(--color-success)' : 'var(--text-muted)',
+                                fontSize: '0.72rem',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                padding: '2px 4px',
+                                borderRadius: 'var(--radius-xs)',
+                              }}
+                              title="Copy message to clipboard"
+                            >
+                              {copiedMessageId === msg.id ? <Check size={12} /> : <Copy size={12} />}
+                              <span>{copiedMessageId === msg.id ? 'Copied' : 'Copy'}</span>
+                            </button>
 
-                        {isLastAssistant && !isSending && (
-                          <button
-                            type="button"
-                            onClick={handleRegenerate}
-                            style={{
-                              background: 'transparent',
-                              border: 'none',
-                              color: 'var(--text-muted)',
-                              fontSize: '0.72rem',
-                              cursor: 'pointer',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              padding: '2px 4px',
-                              borderRadius: 'var(--radius-xs)',
-                            }}
-                            title="Regenerate last response"
-                          >
-                            <RefreshCw size={12} />
-                            <span>Regenerate</span>
-                          </button>
+                            {isLastAssistant && !isSending && (
+                              <button
+                                type="button"
+                                onClick={handleRegenerate}
+                                style={{
+                                  background: 'transparent',
+                                  border: 'none',
+                                  color: 'var(--text-muted)',
+                                  fontSize: '0.72rem',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  padding: '2px 4px',
+                                  borderRadius: 'var(--radius-xs)',
+                                }}
+                                title="Regenerate last response"
+                              >
+                                <RefreshCw size={12} />
+                                <span>Regenerate</span>
+                              </button>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>
@@ -1244,8 +1484,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 );
               })}
 
-              {/* Animated Typing / Thinking Indicator */}
-              {isSending && (
+              {/* Animated Typing / Thinking Indicator (Shown if no assistant message is actively streaming) */}
+              {isSending && !messages.some((m) => m.isStreaming) && (
                 <div
                   style={{
                     display: 'flex',
@@ -1731,10 +1971,16 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         isOpen={isPdfModalOpen}
         resource={activePdfResource}
         initialPage={activePdfPage}
+        pageEndNumber={activePdfPageEnd}
+        pageRange={activePdfPageRange}
+        initialError={readerError}
         onClose={() => {
           setIsPdfModalOpen(false);
           setActivePdfResource(null);
           setActivePdfPage(undefined);
+          setActivePdfPageEnd(undefined);
+          setActivePdfPageRange(undefined);
+          setReaderError(null);
         }}
       />
     </div>

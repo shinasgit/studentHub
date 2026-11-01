@@ -153,6 +153,8 @@ export const generateChatResponse = async (
     collectionName,
     maxHistoryTurns,
     enableQueryCondensation,
+    stream,
+    onChunk,
   } = options;
 
   const activeModel = requestedModel || getSelectedModel() || 'llama3.2:3b';
@@ -214,6 +216,8 @@ export const generateChatResponse = async (
         conversationHistory: priorHistory,
         maxHistoryTurns,
         enableQueryCondensation,
+        stream,
+        onChunk,
       }
     );
 
@@ -231,6 +235,9 @@ export const generateChatResponse = async (
       generationDurationMs: ragResult.generationDurationMs,
       condensedQuestion: ragResult.condensedQuestion,
       condensationDurationMs: ragResult.condensationDurationMs,
+      timeToFirstTokenMs: ragResult.timeToFirstTokenMs,
+      isStreamed: ragResult.isStreamed,
+      isCancelled: ragResult.isCancelled,
     };
   }
 
@@ -254,20 +261,47 @@ export const generateChatResponse = async (
       model: activeModel,
       messages: ollamaMessages,
       temperature,
+      stream: stream ?? Boolean(onChunk),
+      onChunk,
       abortSignal,
       customBaseUrl,
     });
 
+    if (result.isCancelled) {
+      return {
+        text: result.text.trim(),
+        model: result.model || activeModel,
+        durationMs: result.durationMs,
+        timeToFirstTokenMs: result.timeToFirstTokenMs,
+        isStreamed: Boolean(result.isStreamed),
+        isCancelled: true,
+      };
+    }
+
     if (!result.text || !result.text.trim()) {
-      throw new Error('The model returned an empty response. Please try asking again.');
+      if (!abortSignal?.aborted) {
+        throw new Error('The model returned an empty response. Please try asking again.');
+      }
     }
 
     return {
       text: result.text.trim(),
       model: result.model || activeModel,
       durationMs: result.durationMs,
+      timeToFirstTokenMs: result.timeToFirstTokenMs,
+      isStreamed: result.isStreamed,
+      isCancelled: result.isCancelled,
     };
   } catch (err: unknown) {
+    if (abortSignal?.aborted || (err instanceof Error && err.name === 'AbortError')) {
+      return {
+        text: '',
+        model: activeModel,
+        durationMs: 0,
+        isCancelled: true,
+      };
+    }
+
     const errorInfo = parseOllamaError(err, activeModel);
 
     // If chat failed because endpoint only supports /api/generate or method mismatch, try fallback
@@ -288,6 +322,8 @@ export const generateChatResponse = async (
           prompt: fallbackPrompt,
           system: systemPrompt,
           temperature,
+          stream: stream ?? Boolean(onChunk),
+          onChunk,
           abortSignal,
           customBaseUrl,
         });
@@ -297,6 +333,9 @@ export const generateChatResponse = async (
             text: fallbackResult.text.trim(),
             model: fallbackResult.model || activeModel,
             durationMs: fallbackResult.durationMs,
+            timeToFirstTokenMs: fallbackResult.timeToFirstTokenMs,
+            isStreamed: fallbackResult.isStreamed,
+            isCancelled: fallbackResult.isCancelled,
           };
         }
       } catch {

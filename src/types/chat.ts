@@ -32,6 +32,9 @@ export interface ChatMessage {
   generationDurationMs?: number;
   condensedQuestion?: string;
   condensationDurationMs?: number;
+  isStreaming?: boolean;
+  isCancelled?: boolean;
+  timeToFirstTokenMs?: number;
 }
 
 export interface ChatSession {
@@ -61,6 +64,8 @@ export interface GenerateChatResponseOptions {
   collectionName?: string;
   maxHistoryTurns?: number;
   enableQueryCondensation?: boolean;
+  stream?: boolean;
+  onChunk?: (chunk: string, accumulated: string) => void;
 }
 
 export interface GenerateChatResponseResult {
@@ -73,5 +78,8 @@ export interface GenerateChatResponseResult {
   generationDurationMs?: number;
   condensedQuestion?: string;
   condensationDurationMs?: number;
+  timeToFirstTokenMs?: number;
+  isStreamed?: boolean;
+  isCancelled?: boolean;
 }
 

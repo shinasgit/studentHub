@@ -253,6 +253,8 @@ export interface GenerateCompletionOptions {
   maxTokens?: number;
   abortSignal?: AbortSignal;
   customBaseUrl?: string;
+  stream?: boolean;
+  onChunk?: (chunk: string, accumulated: string) => void;
 }
 
 export interface GenerateCompletionResult {
@@ -262,15 +264,172 @@ export interface GenerateCompletionResult {
   promptEvalCount?: number;
   evalCount?: number;
   evalDurationMs?: number;
+  timeToFirstTokenMs?: number;
+  isStreamed?: boolean;
+  isCancelled?: boolean;
 }
 
 /**
+ * Quick online connectivity check for Ollama.
+ */
+export const isOllamaOnline = async (customBaseUrl?: string): Promise<boolean> => {
+  const conn = await checkOllamaConnection(customBaseUrl);
+  return Boolean(conn.connected);
+};
+
+export interface NdjsonStreamResult {
+  text: string;
+  done?: boolean;
+  model?: string;
+  totalDuration?: number;
+  evalCount?: number;
+  doneData?: OllamaGenerateResponse;
+  timeToFirstTokenMs?: number;
+  isCancelled?: boolean;
+}
+
+/**
+ * Parses an Ollama NDJSON ReadableStream progressively.
+ * Robust against chunk boundary splits across arbitrary byte boundaries,
+ * handles malformed lines gracefully, and supports AbortSignal cancellation.
+ */
+export const parseNdjsonStream = async (
+  stream: ReadableStream<Uint8Array>,
+  onChunk?: (chunk: string, accumulated: string) => void,
+  abortSignal?: AbortSignal,
+  requestStartTime?: number
+): Promise<NdjsonStreamResult> => {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let accumulated = '';
+  let lineBuffer = '';
+  let doneData: OllamaGenerateResponse | undefined;
+  let timeToFirstTokenMs: number | undefined;
+  const startTime = requestStartTime ?? performance.now();
+  let isCancelled = false;
+
+  const onAbort = () => {
+    isCancelled = true;
+    reader.cancel().catch(() => {});
+  };
+
+  if (abortSignal) {
+    if (abortSignal.aborted) {
+      isCancelled = true;
+      reader.cancel().catch(() => {});
+      return { text: '', done: false, isCancelled: true };
+    }
+    abortSignal.addEventListener('abort', onAbort, { once: true });
+  }
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunkStr = decoder.decode(value, { stream: true });
+      lineBuffer += chunkStr;
+
+      const lines = lineBuffer.split('\n');
+      // The last element is incomplete until next newline arrives
+      lineBuffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        try {
+          const parsed = JSON.parse(trimmed) as OllamaGenerateResponse;
+          if (parsed.response) {
+            if (timeToFirstTokenMs === undefined) {
+              timeToFirstTokenMs = Math.round(performance.now() - startTime);
+            }
+            accumulated += parsed.response;
+            if (onChunk) {
+              onChunk(parsed.response, accumulated);
+            }
+          }
+          if (parsed.done) {
+            doneData = parsed;
+          }
+        } catch {
+          // Gracefully skip malformed chunks without crashing stream
+        }
+      }
+    }
+
+    if (lineBuffer.trim()) {
+      try {
+        const parsed = JSON.parse(lineBuffer.trim()) as OllamaGenerateResponse;
+        if (parsed.response) {
+          if (timeToFirstTokenMs === undefined) {
+            timeToFirstTokenMs = Math.round(performance.now() - startTime);
+          }
+          accumulated += parsed.response;
+          if (onChunk) {
+            onChunk(parsed.response, accumulated);
+          }
+        }
+        if (parsed.done) {
+          doneData = parsed;
+        }
+      } catch {
+        // ignore incomplete trailing fragment
+      }
+    }
+
+    const isCompleted = Boolean(doneData?.done) || (!isCancelled && !abortSignal?.aborted);
+
+    return {
+      text: accumulated,
+      done: isCompleted,
+      model: doneData?.model,
+      totalDuration: doneData?.total_duration,
+      evalCount: doneData?.eval_count,
+      doneData,
+      timeToFirstTokenMs,
+      isCancelled,
+    };
+  } catch (err: unknown) {
+    if (abortSignal?.aborted || isCancelled) {
+      return {
+        text: accumulated,
+        done: false,
+        model: doneData?.model,
+        totalDuration: doneData?.total_duration,
+        evalCount: doneData?.eval_count,
+        doneData,
+        timeToFirstTokenMs,
+        isCancelled: true,
+      };
+    }
+    throw err;
+  } finally {
+    if (abortSignal) {
+      abortSignal.removeEventListener('abort', onAbort);
+    }
+    reader.releaseLock();
+  }
+};
+
+/**
  * Send a prompt to the selected local Ollama model and return the generated completion.
+ * Supports both progressive streaming (via onChunk) and standard single-shot resolution.
  */
 export const generateCompletion = async (
   options: GenerateCompletionOptions
 ): Promise<GenerateCompletionResult> => {
-  const { model, prompt, system, temperature = 0.7, maxTokens, abortSignal, customBaseUrl } = options;
+  const {
+    model,
+    prompt,
+    system,
+    temperature = 0.7,
+    maxTokens,
+    abortSignal,
+    customBaseUrl,
+    stream = false,
+    onChunk,
+  } = options;
 
   if (!model || !model.trim()) {
     throw new Error('Please select an available Ollama model before generating.');
@@ -280,13 +439,14 @@ export const generateCompletion = async (
     throw new Error('Please enter a prompt to generate text.');
   }
 
+  const isStreaming = Boolean(stream || onChunk);
   const baseUrl = (customBaseUrl || getOllamaBaseUrl()).replace(/\/+$/, '');
   const startTime = performance.now();
 
   const payload: OllamaGenerateRequest = {
     model: model.trim(),
     prompt: prompt.trim(),
-    stream: false,
+    stream: isStreaming,
     system: system?.trim(),
     options: {
       temperature,
@@ -299,7 +459,7 @@ export const generateCompletion = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Accept: 'application/json',
+        Accept: isStreaming ? 'application/x-ndjson, application/json' : 'application/json',
       },
       body: JSON.stringify(payload),
       signal: abortSignal,
@@ -310,6 +470,41 @@ export const generateCompletion = async (
       throw new Error(`Ollama API error (${response.status}): ${errBody || response.statusText}`);
     }
 
+    // 1. Handle progressive streaming response
+    if (isStreaming && response.body) {
+      const streamResult = await parseNdjsonStream(response.body, onChunk, abortSignal, startTime);
+      const durationMs = Math.round(performance.now() - startTime);
+
+      if (streamResult.isCancelled) {
+        return {
+          text: streamResult.text,
+          model: streamResult.doneData?.model || model,
+          durationMs,
+          timeToFirstTokenMs: streamResult.timeToFirstTokenMs,
+          isStreamed: true,
+          isCancelled: true,
+        };
+      }
+
+      if (!streamResult.text && streamResult.doneData?.done) {
+        throw new Error('The model completed but returned an empty response.');
+      }
+
+      return {
+        text: streamResult.text,
+        model: streamResult.doneData?.model || model,
+        durationMs,
+        promptEvalCount: streamResult.doneData?.prompt_eval_count,
+        evalCount: streamResult.doneData?.eval_count,
+        evalDurationMs: streamResult.doneData?.eval_duration
+          ? Math.round(streamResult.doneData.eval_duration / 1_000_000)
+          : undefined,
+        timeToFirstTokenMs: streamResult.timeToFirstTokenMs,
+        isStreamed: true,
+      };
+    }
+
+    // 2. Handle non-streaming response
     const data = (await response.json()) as OllamaGenerateResponse;
     const durationMs = Math.round(performance.now() - startTime);
 
@@ -324,8 +519,18 @@ export const generateCompletion = async (
       promptEvalCount: data.prompt_eval_count,
       evalCount: data.eval_count,
       evalDurationMs: data.eval_duration ? Math.round(data.eval_duration / 1_000_000) : undefined,
+      isStreamed: false,
     };
   } catch (err: unknown) {
+    if (abortSignal?.aborted) {
+      return {
+        text: '',
+        model,
+        durationMs: Math.round(performance.now() - startTime),
+        isStreamed: isStreaming,
+        isCancelled: true,
+      };
+    }
     const errorInfo = parseOllamaError(err, model, baseUrl);
     const enrichedError = new Error(errorInfo.message);
     (enrichedError as unknown as { info: OllamaErrorInfo }).info = errorInfo;
@@ -334,7 +539,7 @@ export const generateCompletion = async (
 };
 
 /**
- * Send a chat message list to Ollama's /api/chat endpoint.
+ * Send a chat message list to Ollama's /api/chat endpoint with progressive streaming support.
  */
 export const generateChat = async (
   options: {
@@ -343,16 +548,26 @@ export const generateChat = async (
     temperature?: number;
     abortSignal?: AbortSignal;
     customBaseUrl?: string;
+    stream?: boolean;
+    onChunk?: (chunk: string, accumulated: string) => void;
   }
-): Promise<{ text: string; model: string; durationMs: number }> => {
-  const { model, messages, temperature = 0.7, abortSignal, customBaseUrl } = options;
+): Promise<{
+  text: string;
+  model: string;
+  durationMs: number;
+  timeToFirstTokenMs?: number;
+  isStreamed?: boolean;
+  isCancelled?: boolean;
+}> => {
+  const { model, messages, temperature = 0.7, abortSignal, customBaseUrl, stream = false, onChunk } = options;
+  const isStreaming = Boolean(stream || onChunk);
   const baseUrl = (customBaseUrl || getOllamaBaseUrl()).replace(/\/+$/, '');
   const startTime = performance.now();
 
   const payload: OllamaChatRequest = {
     model: model.trim(),
     messages,
-    stream: false,
+    stream: isStreaming,
     options: { temperature },
   };
 
@@ -361,7 +576,7 @@ export const generateChat = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Accept: 'application/json',
+        Accept: isStreaming ? 'application/x-ndjson, application/json' : 'application/json',
       },
       body: JSON.stringify(payload),
       signal: abortSignal,
@@ -372,6 +587,53 @@ export const generateChat = async (
       throw new Error(`Ollama chat error (${response.status}): ${errBody || response.statusText}`);
     }
 
+    if (isStreaming && response.body) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let accumulated = '';
+      let lineBuffer = '';
+      let chatModel = model;
+      let timeToFirstTokenMs: number | undefined;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        lineBuffer += decoder.decode(value, { stream: true });
+        const lines = lineBuffer.split('\n');
+        lineBuffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const parsed = JSON.parse(trimmed) as OllamaChatResponse;
+            if (parsed.model) chatModel = parsed.model;
+            if (parsed.message?.content) {
+              if (timeToFirstTokenMs === undefined) {
+                timeToFirstTokenMs = Math.round(performance.now() - startTime);
+              }
+              accumulated += parsed.message.content;
+              if (onChunk) {
+                onChunk(parsed.message.content, accumulated);
+              }
+            }
+          } catch {
+            // ignore malformed lines
+          }
+        }
+      }
+
+      const durationMs = Math.round(performance.now() - startTime);
+      return {
+        text: accumulated,
+        model: chatModel,
+        durationMs,
+        timeToFirstTokenMs,
+        isStreamed: true,
+      };
+    }
+
     const data = (await response.json()) as OllamaChatResponse;
     const durationMs = Math.round(performance.now() - startTime);
 
@@ -379,8 +641,18 @@ export const generateChat = async (
       text: data.message?.content || '',
       model: data.model,
       durationMs,
+      isStreamed: false,
     };
   } catch (err: unknown) {
+    if (abortSignal?.aborted) {
+      return {
+        text: '',
+        model,
+        durationMs: Math.round(performance.now() - startTime),
+        isStreamed: isStreaming,
+        isCancelled: true,
+      };
+    }
     const errorInfo = parseOllamaError(err, model, baseUrl);
     const enrichedError = new Error(errorInfo.message);
     (enrichedError as unknown as { info: OllamaErrorInfo }).info = errorInfo;

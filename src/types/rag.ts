@@ -49,6 +49,18 @@ export interface RagSourceReference {
    * Short text excerpt for previewing.
    */
   textSnippet?: string;
+  /**
+   * Whether this citation is strictly verified against retrieved document evidence.
+   */
+  isVerified?: boolean;
+  /**
+   * Associated student ID for multi-tenant isolation validation.
+   */
+  studentId?: string;
+  /**
+   * Descriptive validation error if citation was invalid or failed verification.
+   */
+  validationError?: string;
 }
 
 /**
@@ -128,6 +140,14 @@ export interface RagAnswerOptions {
    * Whether to truncate a remaining oversized chunk to fit available budget space. Default: false.
    */
   allowTailTruncation?: boolean;
+  /**
+   * Whether to enable progressive streaming of LLM response chunks. Default: false.
+   */
+  stream?: boolean;
+  /**
+   * Callback invoked progressively as new token chunks are streamed from the LLM.
+   */
+  onChunk?: (chunk: string, accumulated: string) => void;
 }
 
 /**
@@ -177,7 +197,7 @@ export interface RagAnswerResult {
   /**
    * Execution status.
    */
-  status: 'success' | 'no_context' | 'error';
+  status: 'success' | 'no_context' | 'error' | 'cancelled';
   /**
    * Error message if generation failed.
    */
@@ -194,6 +214,26 @@ export interface RagAnswerResult {
    * Time spent in query condensation (milliseconds).
    */
   condensationDurationMs?: number;
+  /**
+   * Number of citations that passed strict verification against retrieved evidence.
+   */
+  verifiedSourcesCount?: number;
+  /**
+   * Number of citations that failed verification or lacked evidence grounding.
+   */
+  unverifiedCitationsCount?: number;
+  /**
+   * Time in milliseconds from request start until the first streamed token was received.
+   */
+  timeToFirstTokenMs?: number;
+  /**
+   * Whether this response was delivered via progressive streaming.
+   */
+  isStreamed?: boolean;
+  /**
+   * Whether generation was cancelled prematurely by the user.
+   */
+  isCancelled?: boolean;
 }
 
 /**

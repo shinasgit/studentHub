@@ -16,6 +16,13 @@ import {
   formatPageCitation,
   isDuplicateOrRedundantChunk,
 } from './ragContextService';
+import {
+  validateCitation,
+  verifyCitationsAgainstEvidence,
+  filterVerifiedCitations,
+  extractInlineCitations,
+  resolveCitationNavigation,
+} from './citationService';
 import type { ChatStudyScope } from '../types/chat';
 
 export {
@@ -24,6 +31,11 @@ export {
   truncateAtSentenceBoundary,
   formatPageCitation,
   isDuplicateOrRedundantChunk,
+  validateCitation,
+  verifyCitationsAgainstEvidence,
+  filterVerifiedCitations,
+  extractInlineCitations,
+  resolveCitationNavigation,
 };
 import type { SemanticSearchResultItem, SemanticSearchFilters } from '../types/semanticSearch';
 import type {
@@ -298,6 +310,23 @@ export const generateRagAnswer = async (
       abortSignal: options?.abortSignal,
     });
   } catch (retrievalErr) {
+    if (options?.abortSignal?.aborted || (retrievalErr instanceof Error && retrievalErr.name === 'AbortError')) {
+      return {
+        answer: '',
+        sources: [],
+        model,
+        durationMs: Math.round(performance.now() - overallStartTime),
+        retrievalDurationMs: Math.round(performance.now() - retrievalStartTime),
+        generationDurationMs: 0,
+        retrievedChunksCount: 0,
+        usedChunksCount: 0,
+        isGrounded: false,
+        status: 'cancelled',
+        isCancelled: true,
+        condensedQuestion,
+        condensationDurationMs,
+      };
+    }
     const errMsg = retrievalErr instanceof Error ? retrievalErr.message : String(retrievalErr);
     return {
       answer: '',
@@ -379,7 +408,7 @@ export const generateRagAnswer = async (
     };
   }
 
-  // 8. Invoke Local LLM (Llama 3.2 3B) via Ollama
+  // 8. Invoke Local LLM (Llama 3.2 3B) via Ollama (Streaming or standard)
   const generationStartTime = performance.now();
 
   try {
@@ -388,6 +417,8 @@ export const generateRagAnswer = async (
       prompt: promptContext.userPrompt,
       system: promptContext.systemPrompt,
       temperature,
+      stream: options?.stream ?? Boolean(options?.onChunk),
+      onChunk: options?.onChunk,
       abortSignal: options?.abortSignal,
       customBaseUrl: options?.customOllamaUrl,
     });
@@ -396,15 +427,61 @@ export const generateRagAnswer = async (
     const overallDurationMs = Math.round(performance.now() - overallStartTime);
     const answerText = completionResult.text.trim();
 
-    // Check if the answer explicitly stated that context was insufficient
+    // Check if generation was cancelled via AbortSignal
+    if (completionResult.isCancelled || options?.abortSignal?.aborted) {
+      return {
+        answer: answerText,
+        sources: [],
+        model: completionResult.model || model,
+        durationMs: overallDurationMs,
+        retrievalDurationMs,
+        generationDurationMs,
+        retrievedChunksCount: searchResponse.results.length,
+        usedChunksCount: promptContext.chunksUsed,
+        dedupRemovedCount: promptContext.dedupRemovedCount,
+        verifiedSourcesCount: 0,
+        unverifiedCitationsCount: 0,
+        isGrounded: false,
+        status: 'cancelled',
+        isCancelled: true,
+        isStreamed: Boolean(completionResult.isStreamed),
+        timeToFirstTokenMs: completionResult.timeToFirstTokenMs,
+        assembledPrompt: `${promptContext.systemPrompt}\n\n${promptContext.userPrompt}`,
+        condensedQuestion,
+        condensationDurationMs,
+      };
+    }
+
+    // Check if the answer explicitly stated that context was insufficient to answer
+    const lowerAnswer = answerText.toLowerCase();
     const isInsufficient =
-      answerText.includes('not enough information') ||
-      answerText.includes('does not contain enough information') ||
-      answerText.includes('no information provided');
+      (lowerAnswer.includes('not enough information') ||
+        lowerAnswer.includes('does not contain enough information') ||
+        lowerAnswer.includes('no information provided') ||
+        lowerAnswer.includes('insufficient information')) &&
+      (lowerAnswer.includes('to answer') ||
+        lowerAnswer.includes('to fully answer') ||
+        lowerAnswer.includes('to explain') ||
+        lowerAnswer.includes('based on your indexed study materials') ||
+        lowerAnswer.length < 200);
+
+    // Stage 8.5: Citation Verification & Evidence Consistency
+    const verifiedSourcesList = verifyCitationsAgainstEvidence(
+      promptContext.sources,
+      searchResponse.results,
+      {
+        expectedStudentId: verifiedStudentId,
+        expectedSubjectId: scope.subjectId,
+        expectedModuleIds: scope.scopeMode === 'specific_modules' ? scope.moduleIds : undefined,
+      }
+    );
+
+    const strictlyVerifiedSources = filterVerifiedCitations(verifiedSourcesList);
+    const unverifiedCitationsCount = verifiedSourcesList.length - strictlyVerifiedSources.length;
 
     return {
       answer: answerText,
-      sources: isInsufficient ? [] : promptContext.sources,
+      sources: isInsufficient ? [] : strictlyVerifiedSources,
       model: completionResult.model || model,
       durationMs: overallDurationMs,
       retrievalDurationMs,
@@ -412,13 +489,38 @@ export const generateRagAnswer = async (
       retrievedChunksCount: searchResponse.results.length,
       usedChunksCount: promptContext.chunksUsed,
       dedupRemovedCount: promptContext.dedupRemovedCount,
-      isGrounded: !isInsufficient && promptContext.sources.length > 0,
+      verifiedSourcesCount: isInsufficient ? 0 : strictlyVerifiedSources.length,
+      unverifiedCitationsCount: isInsufficient ? 0 : unverifiedCitationsCount,
+      isGrounded: !isInsufficient && strictlyVerifiedSources.length > 0,
       status: 'success',
       assembledPrompt: `${promptContext.systemPrompt}\n\n${promptContext.userPrompt}`,
       condensedQuestion,
       condensationDurationMs,
+      timeToFirstTokenMs: completionResult.timeToFirstTokenMs,
+      isStreamed: completionResult.isStreamed,
+      isCancelled: false,
     };
   } catch (llmErr) {
+    if (options?.abortSignal?.aborted || (llmErr instanceof Error && llmErr.name === 'AbortError')) {
+      const generationDurationMs = Math.round(performance.now() - generationStartTime);
+      return {
+        answer: '',
+        sources: [],
+        model,
+        durationMs: Math.round(performance.now() - overallStartTime),
+        retrievalDurationMs,
+        generationDurationMs,
+        retrievedChunksCount: searchResponse.results.length,
+        usedChunksCount: promptContext.chunksUsed,
+        dedupRemovedCount: promptContext.dedupRemovedCount,
+        isGrounded: false,
+        status: 'cancelled',
+        isCancelled: true,
+        condensedQuestion,
+        condensationDurationMs,
+      };
+    }
+
     const errorInfo = parseOllamaError(llmErr, model, options?.customOllamaUrl);
     const generationDurationMs = Math.round(performance.now() - generationStartTime);
 
