@@ -21,6 +21,7 @@ import {
   BookOpen,
   Globe,
   Video,
+  ShieldCheck,
 } from 'lucide-react';
 import { Button } from '../../components/common/Button';
 import { getNotes, createNote, deleteNote } from '../../services/noteService';
@@ -30,10 +31,14 @@ import {
   type QuickNotesResult,
 } from '../../services/quickNotesService';
 import { getSelectedModel, checkOllamaConnection } from '../../services/ollamaService';
+import { resolveCitationNavigation } from '../../services/citationService';
+import { PDFReaderModal, type PDFReaderErrorState } from '../reader/PDFReaderModal';
 import type { Note, NoteInput } from '../../types/note';
 import type { Subject } from '../../types/subject';
 import type { Module } from '../../types/module';
 import type { StudyMaterial } from '../../types/studyTools';
+import type { StudyResource } from '../../types/resource';
+import type { RagSourceReference } from '../../types/rag';
 
 interface QuickNotesViewProps {
   user: User;
@@ -86,6 +91,14 @@ export const QuickNotesView: React.FC<QuickNotesViewProps> = ({
   const [copied, setCopied] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
+  // PDF Reader Navigation Modal for RAG Citations
+  const [activePdfResource, setActivePdfResource] = useState<StudyResource | null>(null);
+  const [activePdfPage, setActivePdfPage] = useState<number | undefined>(undefined);
+  const [activePdfPageEnd, setActivePdfPageEnd] = useState<number | undefined>(undefined);
+  const [activePdfPageRange, setActivePdfPageRange] = useState<string | undefined>(undefined);
+  const [readerError, setReaderError] = useState<PDFReaderErrorState | null>(null);
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
+
   // Manual note creator state
   const [isCreatingManual, setIsCreatingManual] = useState(false);
   const [manualTitle, setManualTitle] = useState('');
@@ -99,6 +112,47 @@ export const QuickNotesView: React.FC<QuickNotesViewProps> = ({
   const triggerToast = (msg: string) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 3000);
+  };
+
+  const handleOpenSourceReference = async (source: RagSourceReference) => {
+    try {
+      const resolution = await resolveCitationNavigation(user.uid, source);
+
+      if (resolution.status === 'ready') {
+        setActivePdfResource(resolution.resource);
+        setActivePdfPage(resolution.pageNumber);
+        setActivePdfPageEnd(resolution.pageEndNumber);
+        setActivePdfPageRange(resolution.pageRange);
+        setReaderError(null);
+        setIsPdfModalOpen(true);
+        return;
+      }
+
+      const fallbackResource: StudyResource = resolution.resource || {
+        id: source.resourceId || 'unknown',
+        userId: user.uid,
+        subjectId: source.subjectId || selectedSubjectId,
+        moduleId: source.moduleId || null,
+        title: source.resourceName || 'Unknown Document',
+        type: 'pdf',
+        url: '',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      setActivePdfResource(fallbackResource);
+      setActivePdfPage(resolution.pageNumber);
+      setActivePdfPageEnd(resolution.pageEndNumber);
+      setActivePdfPageRange(resolution.pageRange);
+      setReaderError({
+        type: resolution.status,
+        title: resolution.errorTitle || 'Document Unavailable',
+        message: resolution.errorMessage || 'Unable to open the cited PDF document.',
+      });
+      setIsPdfModalOpen(true);
+    } catch (err) {
+      console.error('Failed to open cited document:', err);
+    }
   };
 
   // Fetch saved personal notes for this scope
@@ -193,6 +247,9 @@ export const QuickNotesView: React.FC<QuickNotesViewProps> = ({
         subjectName: selectedSubject.name,
         moduleId: selectedModule ? selectedModule.id : null,
         moduleName: selectedModule ? selectedModule.title : undefined,
+        studentId: user?.uid,
+        resourceId: selectedMaterialScope !== 'all' ? selectedMaterialScope : undefined,
+        resourceName: selectedMaterialScope !== 'all' ? targetMaterials[0]?.name : undefined,
         model: activeModel,
         abortSignal: abortController.signal,
         onProgress: (p) => setProgressState(p),
@@ -666,6 +723,26 @@ export const QuickNotesView: React.FC<QuickNotesViewProps> = ({
                   <Cpu size={11} /> {generatedResult.modelUsed}
                 </span>
 
+                {(generatedResult.isGrounded || (generatedResult.ragSources && generatedResult.ragSources.length > 0)) && (
+                  <span
+                    style={{
+                      fontSize: '0.72rem',
+                      fontWeight: 600,
+                      padding: '2px 8px',
+                      borderRadius: 'var(--radius-full)',
+                      background: 'var(--accent-primary-subtle, rgba(59, 130, 246, 0.1))',
+                      color: 'var(--accent-primary)',
+                      border: '1px solid var(--accent-primary)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}
+                    title="Grounded in verified course documents via ChromaDB Advanced RAG"
+                  >
+                    <ShieldCheck size={11} /> RAG Grounded
+                  </span>
+                )}
+
                 {generatedResult.hasOcr && (
                   <span
                     style={{
@@ -691,6 +768,40 @@ export const QuickNotesView: React.FC<QuickNotesViewProps> = ({
                 Characters: {generatedResult.totalSourceCharacters.toLocaleString()} &bull; Duration:{' '}
                 {(generatedResult.durationMs / 1000).toFixed(1)}s
               </div>
+
+              {/* RAG Source References & Citations */}
+              {generatedResult.ragSources && generatedResult.ragSources.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                    Citations:
+                  </span>
+                  {generatedResult.ragSources.map((cite, cIdx) => (
+                    <button
+                      key={cIdx}
+                      type="button"
+                      onClick={() => handleOpenSourceReference(cite)}
+                      style={{
+                        padding: '2px 7px',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '0.72rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        background: 'var(--bg-tertiary)',
+                        color: 'var(--accent-primary)',
+                        border: '1px solid var(--border-subtle)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        transition: 'all 0.15s ease',
+                      }}
+                      title={`Open PDF reader at page ${cite.pageNumber || 1}`}
+                    >
+                      <FileText size={10} />
+                      <span>{cite.resourceName}{cite.pageRange ? ` (pp. ${cite.pageRange})` : cite.pageNumber ? ` (p. ${cite.pageNumber})` : ''}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Actions: View Mode Switcher, Copy, Save, Export */}
@@ -1017,6 +1128,24 @@ export const QuickNotesView: React.FC<QuickNotesViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Built-in PDF Reader Modal for Source References */}
+      <PDFReaderModal
+        isOpen={isPdfModalOpen}
+        resource={activePdfResource}
+        initialPage={activePdfPage}
+        pageEndNumber={activePdfPageEnd}
+        pageRange={activePdfPageRange}
+        initialError={readerError}
+        onClose={() => {
+          setIsPdfModalOpen(false);
+          setActivePdfResource(null);
+          setActivePdfPage(undefined);
+          setActivePdfPageEnd(undefined);
+          setActivePdfPageRange(undefined);
+          setReaderError(null);
+        }}
+      />
     </div>
   );
 };

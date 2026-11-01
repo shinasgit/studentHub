@@ -6,7 +6,10 @@
 import { extractStudyMaterialsText, type ExtractedSourceInfo } from './studyExtractionPipeline';
 import { generateCompletion, getSelectedModel } from './ollamaService';
 import { cleanAndParseJson } from './practiceQuestionsService';
+import { generateStudyToolContent } from './studyToolGenerationService';
+import { auth } from '../lib/firebase';
 import type { McqQuestionItem, StudyMaterial } from '../types/studyTools';
+import type { RagSourceReference } from '../types/rag';
 
 export interface McqQuizProgress {
   stage:
@@ -32,11 +35,13 @@ export interface McqQuizResult {
   questions: McqQuestionItem[];
   difficulty: 'easy' | 'medium' | 'hard';
   sources: ExtractedSourceInfo[];
+  ragSources?: RagSourceReference[];
   totalSourceCharacters: number;
   modelUsed: string;
   durationMs: number;
   hasOcr: boolean;
   generatedAt: string;
+  isGrounded?: boolean;
 }
 
 export interface GenerateMcqQuizOptions {
@@ -45,10 +50,15 @@ export interface GenerateMcqQuizOptions {
   subjectName: string;
   moduleId?: string | null;
   moduleName?: string;
+  studentId?: string;
+  resourceId?: string;
+  resourceName?: string;
   count?: number; // strictly 10 per specification
   difficulty?: 'easy' | 'medium' | 'hard'; // default: 'medium'
   model?: string;
   customBaseUrl?: string;
+  customChromaUrl?: string;
+  collectionName?: string;
   abortSignal?: AbortSignal;
   onProgress?: (progress: McqQuizProgress) => void;
 }
@@ -249,7 +259,73 @@ export const generateMcqQuiz = async (
   const scopeTitle = moduleName ? `${subjectName} - ${moduleName}` : subjectName;
   const activeModel = requestedModel || getSelectedModel() || 'llama3.2:3b';
 
-  // 1. Extract text from selected materials (PDFs, Web Articles, YouTube Transcripts)
+  // Stage 10: Attempt Advanced RAG retrieval from indexed ChromaDB chunks first
+  const resolvedStudentId =
+    options.studentId || (typeof window !== 'undefined' ? auth?.currentUser?.uid : undefined);
+  if (resolvedStudentId) {
+    try {
+      const ragGen = await generateStudyToolContent({
+        tool: 'quiz',
+        scope: {
+          subjectId,
+          subjectName,
+          moduleId,
+          moduleName,
+          resourceId: options.resourceId || (materials.length === 1 ? materials[0].id : undefined),
+          resourceName: options.resourceName || (materials.length === 1 ? materials[0].name : undefined),
+          studentId: resolvedStudentId,
+        },
+        materials,
+        count: targetCount,
+        difficulty,
+        model: activeModel,
+        customBaseUrl,
+        customChromaUrl: options.customChromaUrl,
+        collectionName: options.collectionName,
+        abortSignal,
+        onProgress: (p) => {
+          onProgress?.({
+            stage: p.stage as any,
+            message: p.message,
+            percent: p.percent,
+          });
+        },
+      });
+
+      if (ragGen.status === 'success' && ragGen.mcqQuestions && ragGen.mcqQuestions.length > 0) {
+        return {
+          subjectId,
+          subjectName,
+          moduleId,
+          moduleName,
+          questions: ragGen.mcqQuestions,
+          difficulty,
+          sources: ragGen.sources.map((s) => ({
+            id: s.resourceId,
+            fileName: s.resourceName,
+            title: s.resourceName,
+            type: 'PDF' as const,
+            status: 'success' as const,
+            pageCount: 1,
+            characterCount: 500,
+            isScanned: false,
+            ocrPerformed: false,
+          })),
+          ragSources: ragGen.sources,
+          totalSourceCharacters: ragGen.chunksUsedCount * 500,
+          modelUsed: ragGen.modelUsed,
+          durationMs: ragGen.durationMs,
+          hasOcr: false,
+          generatedAt: ragGen.generatedAt,
+          isGrounded: true,
+        };
+      }
+    } catch (ragErr) {
+      console.warn('RAG MCQ quiz failed, falling back to direct extraction:', ragErr);
+    }
+  }
+
+  // Fallback: 1. Extract text from selected materials (PDFs, Web Articles, YouTube Transcripts)
   onProgress?.({
     stage: 'resolving_files',
     message: 'Extracting study materials (PDFs, Web, and Transcripts)...',

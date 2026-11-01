@@ -148,6 +148,37 @@ export interface RagAnswerOptions {
    * Callback invoked progressively as new token chunks are streamed from the LLM.
    */
   onChunk?: (chunk: string, accumulated: string) => void;
+  /**
+   * Stage 9: Retrieval mode. Default: 'hybrid'.
+   * - 'hybrid': Combines semantic vector search and lexical BM25 using Reciprocal Rank Fusion (RRF).
+   * - 'semantic': Vector search only (backward compatibility).
+   * - 'keyword': Lexical BM25 only.
+   */
+  retrievalMode?: 'hybrid' | 'semantic' | 'keyword';
+  /**
+   * Stage 9: Whether to enable lightweight candidate chunk reranking. Default: true.
+   */
+  enableReranking?: boolean;
+  /**
+   * Stage 9: Reranking algorithm method ('cross_scoring' | 'llm' | 'disabled'). Default: 'cross_scoring'.
+   */
+  rerankMethod?: 'cross_scoring' | 'llm' | 'disabled';
+  /**
+   * Stage 9: Whether to enable query expansion using the local LLM. Default: false.
+   */
+  enableQueryExpansion?: boolean;
+  /**
+   * Stage 9: Reciprocal Rank Fusion constant 'k'. Default: 60.
+   */
+  rrfK?: number;
+  /**
+   * Stage 9: Semantic search weight in RRF fusion [0.0 - 2.0]. Default: 1.0.
+   */
+  semanticWeight?: number;
+  /**
+   * Stage 9: Keyword search weight in RRF fusion [0.0 - 2.0]. Default: 1.0.
+   */
+  keywordWeight?: number;
 }
 
 /**
@@ -234,6 +265,30 @@ export interface RagAnswerResult {
    * Whether generation was cancelled prematurely by the user.
    */
   isCancelled?: boolean;
+  /**
+   * Stage 9: Duration of hybrid retrieval operation in milliseconds.
+   */
+  hybridDurationMs?: number;
+  /**
+   * Stage 9: Duration of candidate reranking in milliseconds.
+   */
+  rerankDurationMs?: number;
+  /**
+   * Stage 9: Duration of query expansion in milliseconds.
+   */
+  expansionDurationMs?: number;
+  /**
+   * Stage 9: Expanded queries generated and queried.
+   */
+  expandedQueries?: string[];
+  /**
+   * Stage 9: Active retrieval mode used ('hybrid' | 'semantic' | 'keyword').
+   */
+  retrievalModeUsed?: 'hybrid' | 'semantic' | 'keyword';
+  /**
+   * Stage 9: Reranking method used ('cross_scoring' | 'llm' | 'disabled').
+   */
+  rerankMethodUsed?: string;
 }
 
 /**

@@ -4,6 +4,8 @@
 
 import { extractStudyMaterialsText } from './studyExtractionPipeline';
 import { generateCompletion, getSelectedModel } from './ollamaService';
+import { generateStudyToolContent } from './studyToolGenerationService';
+import { auth } from '../lib/firebase';
 import type { StudyMaterial } from '../types/studyTools';
 
 export interface SummaryProgress {
@@ -31,6 +33,9 @@ export interface SummarySourceInfo {
   characterCount: number;
   isScanned: boolean;
   ocrPerformed: boolean;
+  pageNumber?: number;
+  pageRange?: string;
+  chunkId?: string;
 }
 
 export interface ModuleSummaryResult {
@@ -40,11 +45,13 @@ export interface ModuleSummaryResult {
   moduleName?: string;
   summaryText: string;
   sources: SummarySourceInfo[];
+  ragSources?: import('../types/rag').RagSourceReference[];
   totalSourceCharacters: number;
   modelUsed: string;
   durationMs: number;
   hasOcr: boolean;
   generatedAt: string;
+  isGrounded?: boolean;
 }
 
 export interface GenerateSummaryOptions {
@@ -53,8 +60,13 @@ export interface GenerateSummaryOptions {
   subjectName: string;
   moduleId?: string | null;
   moduleName?: string;
+  studentId?: string;
+  resourceId?: string;
+  resourceName?: string;
   model?: string;
   customBaseUrl?: string;
+  customChromaUrl?: string;
+  collectionName?: string;
   abortSignal?: AbortSignal;
   onProgress?: (progress: SummaryProgress) => void;
 }
@@ -152,7 +164,70 @@ export const generateModuleSummary = async (
   const scopeTitle = moduleName ? `${subjectName} - ${moduleName}` : subjectName;
   const activeModel = requestedModel || getSelectedModel() || 'llama3.2:3b';
 
-  // 1. Extract Text from each selected material (PDFs, Web Articles, YouTube Transcripts)
+  // Stage 10: Attempt Advanced RAG retrieval from indexed ChromaDB chunks first
+  const resolvedStudentId =
+    options.studentId || (typeof window !== 'undefined' ? auth?.currentUser?.uid : undefined);
+  if (resolvedStudentId) {
+    try {
+      const ragGen = await generateStudyToolContent({
+        tool: 'summary',
+        scope: {
+          subjectId,
+          subjectName,
+          moduleId,
+          moduleName,
+          resourceId: options.resourceId || (materials.length === 1 ? materials[0].id : undefined),
+          resourceName: options.resourceName || (materials.length === 1 ? materials[0].name : undefined),
+          studentId: resolvedStudentId,
+        },
+        materials,
+        model: activeModel,
+        customBaseUrl,
+        customChromaUrl: options.customChromaUrl,
+        collectionName: options.collectionName,
+        abortSignal,
+        onProgress: (p) => {
+          onProgress?.({
+            stage: p.stage as any,
+            message: p.message,
+            percent: p.percent,
+          });
+        },
+      });
+
+      if (ragGen.status === 'success' && ragGen.summaryText) {
+        return {
+          subjectId,
+          subjectName,
+          moduleId,
+          moduleName,
+          summaryText: ragGen.summaryText,
+          sources: ragGen.sources.map((s) => ({
+            id: s.resourceId,
+            fileName: s.resourceName,
+            pageCount: 1,
+            characterCount: 500,
+            isScanned: false,
+            ocrPerformed: false,
+            pageNumber: s.pageNumber,
+            pageRange: s.pageRange,
+            chunkId: s.chunkId,
+          })),
+          ragSources: ragGen.sources,
+          totalSourceCharacters: ragGen.chunksUsedCount * 500,
+          modelUsed: ragGen.modelUsed,
+          durationMs: ragGen.durationMs,
+          hasOcr: false,
+          generatedAt: ragGen.generatedAt,
+          isGrounded: true,
+        };
+      }
+    } catch (ragErr) {
+      console.warn('RAG summarization failed, falling back to direct extraction:', ragErr);
+    }
+  }
+
+  // Fallback: Extract Text from each selected material (PDFs, Web Articles, YouTube Transcripts)
   const extraction = await extractStudyMaterialsText(materials, {
     scopeTitle,
     abortSignal,

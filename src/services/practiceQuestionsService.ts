@@ -1,10 +1,9 @@
-// Practice Questions Service for AI Student Hub
-// Generates grounded practice questions with answers and explanations using Ollama Llama 3.2 (3B)
-// 100% Local Inference, Zero Paid APIs, Strict JSON Validation
-
 import { extractStudyMaterialsText, type ExtractedSourceInfo } from './studyExtractionPipeline';
 import { generateCompletion, getSelectedModel } from './ollamaService';
+import { generateStudyToolContent } from './studyToolGenerationService';
+import { auth } from '../lib/firebase';
 import type { PracticeQuestionItem, StudyMaterial } from '../types/studyTools';
+import type { RagSourceReference } from '../types/rag';
 
 export interface PracticeQuestionsProgress {
   stage:
@@ -28,11 +27,13 @@ export interface PracticeQuestionsResult {
   questions: PracticeQuestionItem[];
   difficulty: 'easy' | 'medium' | 'hard';
   sources: ExtractedSourceInfo[];
+  ragSources?: RagSourceReference[];
   totalSourceCharacters: number;
   modelUsed: string;
   durationMs: number;
   hasOcr: boolean;
   generatedAt: string;
+  isGrounded?: boolean;
 }
 
 export interface GeneratePracticeQuestionsOptions {
@@ -41,10 +42,15 @@ export interface GeneratePracticeQuestionsOptions {
   subjectName: string;
   moduleId?: string | null;
   moduleName?: string;
+  studentId?: string;
+  resourceId?: string;
+  resourceName?: string;
   count?: number; // default: 10 (supports 10, 20, 30)
   difficulty?: 'easy' | 'medium' | 'hard'; // default: 'medium'
   model?: string;
   customBaseUrl?: string;
+  customChromaUrl?: string;
+  collectionName?: string;
   abortSignal?: AbortSignal;
   onProgress?: (progress: PracticeQuestionsProgress) => void;
 }
@@ -155,7 +161,73 @@ export const generatePracticeQuestions = async (
   const scopeTitle = moduleName ? `${subjectName} - ${moduleName}` : subjectName;
   const activeModel = requestedModel || getSelectedModel() || 'llama3.2:3b';
 
-  // 1. Extract text from selected materials
+  // Stage 10: Attempt Advanced RAG retrieval from indexed ChromaDB chunks first
+  const resolvedStudentId =
+    options.studentId || (typeof window !== 'undefined' ? auth?.currentUser?.uid : undefined);
+  if (resolvedStudentId) {
+    try {
+      const ragGen = await generateStudyToolContent({
+        tool: 'practice',
+        scope: {
+          subjectId,
+          subjectName,
+          moduleId,
+          moduleName,
+          resourceId: options.resourceId || (materials.length === 1 ? materials[0].id : undefined),
+          resourceName: options.resourceName || (materials.length === 1 ? materials[0].name : undefined),
+          studentId: resolvedStudentId,
+        },
+        materials,
+        count: targetCount,
+        difficulty,
+        model: activeModel,
+        customBaseUrl,
+        customChromaUrl: options.customChromaUrl,
+        collectionName: options.collectionName,
+        abortSignal,
+        onProgress: (p) => {
+          onProgress?.({
+            stage: p.stage as any,
+            message: p.message,
+            percent: p.percent,
+          });
+        },
+      });
+
+      if (ragGen.status === 'success' && ragGen.practiceQuestions && ragGen.practiceQuestions.length > 0) {
+        return {
+          subjectId,
+          subjectName,
+          moduleId,
+          moduleName,
+          questions: ragGen.practiceQuestions,
+          difficulty,
+          sources: ragGen.sources.map((s) => ({
+            id: s.resourceId,
+            fileName: s.resourceName,
+            title: s.resourceName,
+            type: 'PDF' as const,
+            status: 'success' as const,
+            pageCount: 1,
+            characterCount: 500,
+            isScanned: false,
+            ocrPerformed: false,
+          })),
+          ragSources: ragGen.sources,
+          totalSourceCharacters: ragGen.chunksUsedCount * 500,
+          modelUsed: ragGen.modelUsed,
+          durationMs: ragGen.durationMs,
+          hasOcr: false,
+          generatedAt: ragGen.generatedAt,
+          isGrounded: true,
+        };
+      }
+    } catch (ragErr) {
+      console.warn('RAG practice questions failed, falling back to direct extraction:', ragErr);
+    }
+  }
+
+  // Fallback: Extract text from selected materials
   const extraction = await extractStudyMaterialsText(materials, {
     scopeTitle,
     abortSignal,

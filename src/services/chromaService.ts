@@ -493,6 +493,94 @@ export const getChunksByIds = async (
 };
 
 /**
+ * Retrieves stored chunk records matching metadata filter criteria without requiring embeddings.
+ * Useful for keyword/BM25 retrieval, document reconstruction, and multi-tenant scoping.
+ */
+export const getChunksByFilter = async (
+  filter: ChromaFilterCriteria,
+  options?: ChromaStorageOptions & {
+    limit?: number;
+    offset?: number;
+    includeEmbeddings?: boolean;
+    whereDocument?: Record<string, unknown>;
+  }
+): Promise<ChromaRecord[]> => {
+  const collectionName = options?.collectionName || DEFAULT_CHROMA_COLLECTION;
+  const collection = await getCollection(collectionName, options);
+  if (!collection) return [];
+
+  const endpoint = `${getCollectionsEndpoint(options?.customBaseUrl)}/${collection.id}/get`;
+
+  const where = buildChromaWhereFilter(filter);
+  const include = ['documents', 'metadatas'];
+  if (options?.includeEmbeddings) {
+    include.push('embeddings');
+  }
+
+  const payload: Record<string, unknown> = {
+    include,
+  };
+
+  if (where && Object.keys(where).length > 0) {
+    payload.where = where;
+  }
+  if (options?.whereDocument && Object.keys(options.whereDocument).length > 0) {
+    payload.where_document = options.whereDocument;
+  }
+  if (typeof options?.limit === 'number' && options.limit > 0) {
+    payload.limit = options.limit;
+  }
+  if (typeof options?.offset === 'number' && options.offset >= 0) {
+    payload.offset = options.offset;
+  }
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: options?.abortSignal,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      throw new Error(`Failed to get chunks by filter (${response.status}): ${errText}`);
+    }
+
+    const data = (await response.json()) as {
+      ids?: string[];
+      documents?: Array<string | null>;
+      embeddings?: number[][];
+      metadatas?: Array<ChromaVectorMetadata | null>;
+    };
+
+    if (!data.ids || data.ids.length === 0) return [];
+
+    const records: ChromaRecord[] = [];
+    for (let i = 0; i < data.ids.length; i++) {
+      const id = data.ids[i];
+      const text = data.documents?.[i] || '';
+      const embedding = data.embeddings?.[i] || [];
+      const metadata = data.metadatas?.[i] || ({} as ChromaVectorMetadata);
+
+      records.push({
+        id,
+        text,
+        embedding,
+        metadata,
+      });
+    }
+
+    return records;
+  } catch (err) {
+    throw new Error(parseChromaError(err, options?.customBaseUrl || getChromaBaseUrl()));
+  }
+};
+
+/**
  * Builds a valid Chroma metadata where filter dictionary from ChromaFilterCriteria.
  * Supports:
  * - studentId (cross-tenant isolation)

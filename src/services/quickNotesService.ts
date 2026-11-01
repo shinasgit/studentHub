@@ -1,11 +1,10 @@
-// Quick Study Notes Service for AI Student Hub
-// Generates concise, high-yield revision notes using local Ollama (Llama 3.2 3B)
-// 100% Local Inference, Zero Paid APIs, Grounded Academic Revision
-
 import { extractStudyMaterialsText, type ExtractedSourceInfo } from './studyExtractionPipeline';
 import { generateCompletion, getSelectedModel } from './ollamaService';
 import { chunkTextForSummarization } from './summaryService';
+import { generateStudyToolContent } from './studyToolGenerationService';
+import { auth } from '../lib/firebase';
 import type { StudyMaterial } from '../types/studyTools';
+import type { RagSourceReference } from '../types/rag';
 
 export interface QuickNotesProgress {
   stage:
@@ -32,11 +31,13 @@ export interface QuickNotesResult {
   moduleName?: string;
   notesText: string;
   sources: ExtractedSourceInfo[];
+  ragSources?: RagSourceReference[];
   totalSourceCharacters: number;
   modelUsed: string;
   durationMs: number;
   hasOcr: boolean;
   generatedAt: string;
+  isGrounded?: boolean;
 }
 
 export interface GenerateQuickNotesOptions {
@@ -45,8 +46,13 @@ export interface GenerateQuickNotesOptions {
   subjectName: string;
   moduleId?: string | null;
   moduleName?: string;
+  studentId?: string;
+  resourceId?: string;
+  resourceName?: string;
   model?: string;
   customBaseUrl?: string;
+  customChromaUrl?: string;
+  collectionName?: string;
   abortSignal?: AbortSignal;
   onProgress?: (progress: QuickNotesProgress) => void;
 }
@@ -99,7 +105,73 @@ export const generateQuickNotes = async (
   const scopeTitle = moduleName ? `${subjectName} - ${moduleName}` : subjectName;
   const activeModel = requestedModel || getSelectedModel() || 'llama3.2:3b';
 
-  // 1. Extract text from selected materials using shared pipeline
+  // Stage 10: Attempt Advanced RAG retrieval from indexed ChromaDB chunks first
+  const resolvedStudentId =
+    options.studentId || (typeof window !== 'undefined' ? auth?.currentUser?.uid : undefined);
+  if (resolvedStudentId) {
+    try {
+      const ragGen = await generateStudyToolContent({
+        tool: 'notes',
+        scope: {
+          subjectId,
+          subjectName,
+          moduleId,
+          moduleName,
+          resourceId: options.resourceId || (materials.length === 1 ? materials[0].id : undefined),
+          resourceName: options.resourceName || (materials.length === 1 ? materials[0].name : undefined),
+          studentId: resolvedStudentId,
+        },
+        materials,
+        model: activeModel,
+        customBaseUrl,
+        customChromaUrl: options.customChromaUrl,
+        collectionName: options.collectionName,
+        abortSignal,
+        onProgress: (p) => {
+          onProgress?.({
+            stage: p.stage as any,
+            message: p.message,
+            percent: p.percent,
+          });
+        },
+      });
+
+      if (ragGen.status === 'success' && ragGen.notesText) {
+        return {
+          subjectId,
+          subjectName,
+          moduleId,
+          moduleName,
+          notesText: ragGen.notesText,
+          sources: ragGen.sources.map((s) => ({
+            id: s.resourceId,
+            fileName: s.resourceName,
+            title: s.resourceName,
+            type: 'PDF' as const,
+            status: 'success' as const,
+            pageCount: 1,
+            characterCount: 500,
+            isScanned: false,
+            ocrPerformed: false,
+            pageNumber: s.pageNumber,
+            pageRange: s.pageRange,
+            chunkId: s.chunkId,
+          })),
+          ragSources: ragGen.sources,
+          totalSourceCharacters: ragGen.chunksUsedCount * 500,
+          modelUsed: ragGen.modelUsed,
+          durationMs: ragGen.durationMs,
+          hasOcr: false,
+          generatedAt: ragGen.generatedAt,
+          isGrounded: true,
+        };
+      }
+    } catch (ragErr) {
+      console.warn('RAG quick notes failed, falling back to direct extraction:', ragErr);
+    }
+  }
+
+  // Fallback: Extract text from selected materials using shared pipeline
   const extraction = await extractStudyMaterialsText(materials, {
     scopeTitle,
     abortSignal,

@@ -23,6 +23,11 @@ import {
   extractInlineCitations,
   resolveCitationNavigation,
 } from './citationService';
+import { searchHybridChunks } from './hybridSearchService';
+import { rerankChunks } from './rerankingService';
+import { expandQuery, searchWithQueryExpansion } from './queryExpansionService';
+import { rankChunksByBm25, searchByKeyword } from './keywordSearchService';
+import { runRetrievalBenchmark } from './retrievalEvaluationService';
 import type { ChatStudyScope } from '../types/chat';
 
 export {
@@ -36,6 +41,13 @@ export {
   filterVerifiedCitations,
   extractInlineCitations,
   resolveCitationNavigation,
+  searchHybridChunks,
+  rerankChunks,
+  expandQuery,
+  searchWithQueryExpansion,
+  rankChunksByBm25,
+  searchByKeyword,
+  runRetrievalBenchmark,
 };
 import type { SemanticSearchResultItem, SemanticSearchFilters } from '../types/semanticSearch';
 import type {
@@ -179,10 +191,24 @@ ${question.trim()}
 export const generateRagAnswer = async (
   question: string,
   scope: ChatStudyScope,
-  studentId?: string,
-  options?: RagAnswerOptions
+  studentIdOrOptions?: string | RagAnswerOptions,
+  rawOptions?: RagAnswerOptions
 ): Promise<RagAnswerResult> => {
   const overallStartTime = performance.now();
+  let studentId: string | undefined;
+  let options: RagAnswerOptions | undefined;
+
+  if (typeof studentIdOrOptions === 'string') {
+    studentId = studentIdOrOptions;
+    options = rawOptions;
+  } else if (studentIdOrOptions && typeof studentIdOrOptions === 'object') {
+    options = studentIdOrOptions;
+    studentId = (scope as any)?.studentId || (options as any)?.studentId;
+  } else {
+    options = rawOptions;
+    studentId = (scope as any)?.studentId;
+  }
+
   const model = options?.model || getSelectedModel() || DEFAULT_RAG_MODEL;
   const topK = options?.topK ?? DEFAULT_RAG_TOP_K;
   const temperature = options?.temperature ?? DEFAULT_RAG_TEMPERATURE;
@@ -238,7 +264,7 @@ export const generateRagAnswer = async (
     Array.isArray(options?.conversationHistory) &&
     options.conversationHistory.length > 0;
 
-  if (shouldCondense) {
+  if (shouldCondense && options?.conversationHistory) {
     try {
       const condensationResult = await condenseQuestion(
         cleanQuestion,
@@ -290,25 +316,92 @@ export const generateRagAnswer = async (
     }
   }
 
-  // 5. Retrieve Document Chunks from ChromaDB using effectiveSearchQuery
+  // 5. Query Expansion (Stage 9.3)
+  let expansionDurationMs = 0;
+  let expandedQueries: string[] = [];
+  let effectiveQueries = [effectiveSearchQuery];
+
+  if (options?.enableQueryExpansion) {
+    try {
+      const expStart = performance.now();
+      const expRes = await expandQuery(effectiveSearchQuery, {
+        enabled: true,
+        customOllamaUrl: options?.customOllamaUrl,
+        abortSignal: options?.abortSignal,
+      });
+      expansionDurationMs = Math.round(performance.now() - expStart);
+      if (expRes.expandedQueries.length > 0) {
+        expandedQueries = expRes.expandedQueries;
+        effectiveQueries = expRes.allQueries;
+      }
+    } catch (expErr) {
+      console.warn('Query expansion failed, proceeding with original query:', expErr);
+    }
+  }
+
+  // 6. Advanced Retrieval: Hybrid (Semantic ChromaDB + Keyword BM25 with RRF) (Stage 9.1)
   const retrievalStartTime = performance.now();
+  const retrievalMode = options?.retrievalMode || 'hybrid';
   const minSimilarity =
     options?.minSimilarity !== undefined
       ? options.minSimilarity
       : DEFAULT_RAG_MIN_SIMILARITY;
 
-  let searchResponse;
+  let candidateChunks: SemanticSearchResultItem[] = [];
+  let retrievalStatus: 'success' | 'empty' | 'failed' = 'empty';
+  let retrievalError: string | undefined = undefined;
 
   try {
-    searchResponse = await searchSimilarChunks(effectiveSearchQuery, {
-      topK,
-      minSimilarity,
-      filters: searchFilters,
-      collectionName: options?.collectionName,
-      customOllamaUrl: options?.customOllamaUrl,
-      customChromaUrl: options?.customChromaUrl,
-      abortSignal: options?.abortSignal,
-    });
+    if (effectiveQueries.length > 1) {
+      // Multi-query search across expanded queries
+      const multiRes = await searchWithQueryExpansion(effectiveSearchQuery, {
+        topK: topK * 2,
+        mode: retrievalMode,
+        minSimilarity,
+        filters: searchFilters,
+        collectionName: options?.collectionName,
+        customOllamaUrl: options?.customOllamaUrl,
+        customChromaUrl: options?.customChromaUrl,
+        abortSignal: options?.abortSignal,
+        rrfK: options?.rrfK,
+        semanticWeight: options?.semanticWeight,
+        keywordWeight: options?.keywordWeight,
+      });
+      candidateChunks = multiRes.results;
+      retrievalStatus = candidateChunks.length > 0 ? 'success' : 'empty';
+    } else if (retrievalMode === 'semantic') {
+      // Backward-compatible semantic vector retrieval
+      const semRes = await searchSimilarChunks(effectiveSearchQuery, {
+        topK: topK * 2,
+        minSimilarity,
+        filters: searchFilters,
+        collectionName: options?.collectionName,
+        customOllamaUrl: options?.customOllamaUrl,
+        customChromaUrl: options?.customChromaUrl,
+        abortSignal: options?.abortSignal,
+      });
+      candidateChunks = semRes.results;
+      retrievalStatus = semRes.status;
+      retrievalError = semRes.error;
+    } else {
+      // Hybrid (or Keyword) retrieval
+      const hybridRes = await searchHybridChunks(effectiveSearchQuery, {
+        topK: topK * 2,
+        mode: retrievalMode,
+        minSimilarity,
+        filters: searchFilters,
+        collectionName: options?.collectionName,
+        customOllamaUrl: options?.customOllamaUrl,
+        customChromaUrl: options?.customChromaUrl,
+        abortSignal: options?.abortSignal,
+        rrfK: options?.rrfK,
+        semanticWeight: options?.semanticWeight,
+        keywordWeight: options?.keywordWeight,
+      });
+      candidateChunks = hybridRes.results;
+      retrievalStatus = hybridRes.status;
+      retrievalError = hybridRes.error;
+    }
   } catch (retrievalErr) {
     if (options?.abortSignal?.aborted || (retrievalErr instanceof Error && retrievalErr.name === 'AbortError')) {
       return {
@@ -348,7 +441,7 @@ export const generateRagAnswer = async (
   const retrievalDurationMs = Math.round(performance.now() - retrievalStartTime);
 
   // If retrieval failed with an explicit error (e.g., ChromaDB offline or Ollama offline)
-  if (searchResponse.status === 'failed') {
+  if (retrievalStatus === 'failed') {
     return {
       answer: '',
       sources: [],
@@ -360,14 +453,14 @@ export const generateRagAnswer = async (
       usedChunksCount: 0,
       isGrounded: false,
       status: 'error',
-      error: searchResponse.error || 'Failed to search your study documents.',
+      error: retrievalError || 'Failed to search your study documents.',
       condensedQuestion,
       condensationDurationMs,
     };
   }
 
-  // 6. Handle Zero Matching Documents
-  if (!searchResponse.results || searchResponse.results.length === 0) {
+  // 7. Handle Zero Matching Documents
+  if (!candidateChunks || candidateChunks.length === 0) {
     const scopeName = scope.subjectName ? ` for "${scope.subjectName}"` : '';
     const noContextMessage = `Based on your indexed study materials${scopeName}, no relevant passages were found to answer this question. Please ensure your course PDFs are uploaded and indexed.`;
 
@@ -387,8 +480,32 @@ export const generateRagAnswer = async (
     };
   }
 
-  // 7. Build Grounded Prompt with Context Budgeting & Injection Neutralization
-  const promptContext = buildRagPromptContext(cleanQuestion, searchResponse.results, scope, options);
+  // 8. Candidate Reranking (Stage 9.2)
+  let rerankDurationMs = 0;
+  let rerankMethodUsed = options?.rerankMethod || 'cross_scoring';
+  let finalRetrievedChunks = candidateChunks;
+
+  if (options?.enableReranking !== false && candidateChunks.length > 1) {
+    try {
+      const rerankRes = await rerankChunks(effectiveSearchQuery, candidateChunks, {
+        method: options?.rerankMethod ?? 'cross_scoring',
+        topK,
+        customOllamaUrl: options?.customOllamaUrl,
+        abortSignal: options?.abortSignal,
+      });
+      rerankDurationMs = rerankRes.durationMs;
+      rerankMethodUsed = rerankRes.methodUsed;
+      finalRetrievedChunks = rerankRes.rerankedChunks;
+    } catch (rerankErr) {
+      console.warn('Reranking encountered error, proceeding with original candidate order:', rerankErr);
+      finalRetrievedChunks = candidateChunks.slice(0, topK);
+    }
+  } else {
+    finalRetrievedChunks = candidateChunks.slice(0, topK);
+  }
+
+  // 9. Build Grounded Prompt with Context Budgeting & Injection Neutralization
+  const promptContext = buildRagPromptContext(cleanQuestion, finalRetrievedChunks, scope, options);
 
   if (promptContext.chunksUsed === 0) {
     return {
@@ -398,7 +515,7 @@ export const generateRagAnswer = async (
       durationMs: Math.round(performance.now() - overallStartTime),
       retrievalDurationMs,
       generationDurationMs: 0,
-      retrievedChunksCount: searchResponse.results.length,
+      retrievedChunksCount: finalRetrievedChunks.length,
       usedChunksCount: 0,
       dedupRemovedCount: promptContext.dedupRemovedCount,
       isGrounded: false,
@@ -408,7 +525,7 @@ export const generateRagAnswer = async (
     };
   }
 
-  // 8. Invoke Local LLM (Llama 3.2 3B) via Ollama (Streaming or standard)
+  // 10. Invoke Local LLM (Llama 3.2 3B) via Ollama (Streaming or standard)
   const generationStartTime = performance.now();
 
   try {
@@ -436,7 +553,7 @@ export const generateRagAnswer = async (
         durationMs: overallDurationMs,
         retrievalDurationMs,
         generationDurationMs,
-        retrievedChunksCount: searchResponse.results.length,
+        retrievedChunksCount: finalRetrievedChunks.length,
         usedChunksCount: promptContext.chunksUsed,
         dedupRemovedCount: promptContext.dedupRemovedCount,
         verifiedSourcesCount: 0,
@@ -449,6 +566,12 @@ export const generateRagAnswer = async (
         assembledPrompt: `${promptContext.systemPrompt}\n\n${promptContext.userPrompt}`,
         condensedQuestion,
         condensationDurationMs,
+        hybridDurationMs: retrievalDurationMs,
+        rerankDurationMs,
+        expansionDurationMs,
+        expandedQueries,
+        retrievalModeUsed: retrievalMode,
+        rerankMethodUsed,
       };
     }
 
@@ -468,7 +591,7 @@ export const generateRagAnswer = async (
     // Stage 8.5: Citation Verification & Evidence Consistency
     const verifiedSourcesList = verifyCitationsAgainstEvidence(
       promptContext.sources,
-      searchResponse.results,
+      finalRetrievedChunks,
       {
         expectedStudentId: verifiedStudentId,
         expectedSubjectId: scope.subjectId,
@@ -486,7 +609,7 @@ export const generateRagAnswer = async (
       durationMs: overallDurationMs,
       retrievalDurationMs,
       generationDurationMs,
-      retrievedChunksCount: searchResponse.results.length,
+      retrievedChunksCount: finalRetrievedChunks.length,
       usedChunksCount: promptContext.chunksUsed,
       dedupRemovedCount: promptContext.dedupRemovedCount,
       verifiedSourcesCount: isInsufficient ? 0 : strictlyVerifiedSources.length,
@@ -499,6 +622,12 @@ export const generateRagAnswer = async (
       timeToFirstTokenMs: completionResult.timeToFirstTokenMs,
       isStreamed: completionResult.isStreamed,
       isCancelled: false,
+      hybridDurationMs: retrievalDurationMs,
+      rerankDurationMs,
+      expansionDurationMs,
+      expandedQueries,
+      retrievalModeUsed: retrievalMode,
+      rerankMethodUsed,
     };
   } catch (llmErr) {
     if (options?.abortSignal?.aborted || (llmErr instanceof Error && llmErr.name === 'AbortError')) {
@@ -510,7 +639,7 @@ export const generateRagAnswer = async (
         durationMs: Math.round(performance.now() - overallStartTime),
         retrievalDurationMs,
         generationDurationMs,
-        retrievedChunksCount: searchResponse.results.length,
+        retrievedChunksCount: finalRetrievedChunks.length,
         usedChunksCount: promptContext.chunksUsed,
         dedupRemovedCount: promptContext.dedupRemovedCount,
         isGrounded: false,
@@ -531,7 +660,7 @@ export const generateRagAnswer = async (
       durationMs: Math.round(performance.now() - overallStartTime),
       retrievalDurationMs,
       generationDurationMs,
-      retrievedChunksCount: searchResponse.results.length,
+      retrievedChunksCount: finalRetrievedChunks.length,
       usedChunksCount: promptContext.chunksUsed,
       dedupRemovedCount: promptContext.dedupRemovedCount,
       isGrounded: false,
@@ -539,6 +668,12 @@ export const generateRagAnswer = async (
       error: `LLM answer generation failed: ${errorInfo.message}`,
       condensedQuestion,
       condensationDurationMs,
+      hybridDurationMs: retrievalDurationMs,
+      rerankDurationMs,
+      expansionDurationMs,
+      expandedQueries,
+      retrievalModeUsed: retrievalMode,
+      rerankMethodUsed,
     };
   }
 };
