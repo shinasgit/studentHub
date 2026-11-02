@@ -5,6 +5,7 @@
 
 import { resolvePdfArrayBuffer, extractTextFromPdf } from './pdfExtractionService';
 import type { StudyMaterial } from '../types/studyTools';
+import { getCloudApiEndpoint, getAuthBearerHeader } from './apiConfig';
 
 export type SourceCategory = 'PDF' | 'Web' | 'YouTube';
 
@@ -46,12 +47,16 @@ async function fetchServerSideWebContent(
   name?: string,
   abortSignal?: AbortSignal
 ): Promise<{ success: boolean; title: string; text: string; type: 'Web' | 'YouTube'; error?: string }> {
-  // If in browser, call the Vite server-side middleware
+  // If in browser, call the cloud/server-side middleware
   if (typeof window !== 'undefined') {
-    const res = await fetch('/api/extract-web', {
+    const endpoint = getCloudApiEndpoint('/api/extract-web');
+    const authHeaders = await getAuthBearerHeader();
+
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders,
       },
       body: JSON.stringify({ url, name }),
       signal: abortSignal,

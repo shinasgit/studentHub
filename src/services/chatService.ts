@@ -3,20 +3,7 @@
 // 100% Free, Local Privacy, Zero Paid APIs
 // Maintains study scope context and manages conversation persistence in Firestore
 
-import {
-  collection,
-  doc,
-  getDocs,
-  getDoc,
-  addDoc,
-  setDoc,
-  deleteDoc,
-  serverTimestamp,
-  query,
-  orderBy,
-  Timestamp,
-} from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
+import { auth } from '../lib/firebase';
 import type {
   ChatMessage,
   ChatStudyScope,
@@ -32,6 +19,17 @@ import {
   parseOllamaError,
 } from './ollamaService';
 import { generateRagAnswer } from './ragService';
+import { budgetShortTermMemory } from './conversationMemoryService';
+import {
+  getUserConversations,
+  getConversation,
+  createNewConversation,
+  appendConversationMessage,
+  renameConversation as renameConversationRecord,
+  deleteConversation as deleteConversationRecord,
+  clearConversationHistory as clearConversationHistoryRecord,
+  updateConversationMemorySummary as updateConversationMemorySummaryRecord,
+} from './conversationHistoryService';
 
 export const STARTER_PROMPTS: string[] = [
   'Explain the important concepts',
@@ -39,30 +37,6 @@ export const STARTER_PROMPTS: string[] = [
   'Ask me practice questions with solutions',
   'Explain a topic step by step with an example',
 ];
-
-/**
- * Normalizes Firestore timestamps or strings to an ISO string
- */
-const formatTimestamp = (val: unknown): string => {
-  if (val instanceof Timestamp) {
-    return val.toDate().toISOString();
-  }
-  if (typeof val === 'string') {
-    return val;
-  }
-  return new Date().toISOString();
-};
-
-/**
- * Returns the Firestore conversations collection for a specific user
- * Path: users/{userId}/conversations
- */
-const getUserConversationsCollection = (userId: string) => {
-  if (!userId) {
-    throw new Error('User ID is required to access conversations.');
-  }
-  return collection(db, 'users', userId, 'conversations');
-};
 
 /**
  * Builds the educational AI assistant system prompt.
@@ -153,6 +127,8 @@ export const generateChatResponse = async (
     collectionName,
     maxHistoryTurns,
     enableQueryCondensation,
+    conversationSummary,
+    memoryTopics,
     stream,
     onChunk,
   } = options;
@@ -216,6 +192,8 @@ export const generateChatResponse = async (
         conversationHistory: priorHistory,
         maxHistoryTurns,
         enableQueryCondensation,
+        conversationSummary,
+        memoryTopics,
         stream,
         onChunk,
       }
@@ -242,16 +220,20 @@ export const generateChatResponse = async (
   }
 
   // 2. Non-RAG conversational fallback (e.g. general tutor dialogue or when scope has no subject)
-  const systemPrompt = buildEducationalSystemPrompt(scope);
+  let systemPrompt = buildEducationalSystemPrompt(scope);
+  if (conversationSummary && conversationSummary.trim().length > 0) {
+    systemPrompt += `\n\n### LONG-TERM CONVERSATION MEMORY (Prior topics and concepts discussed in this study session):\n${conversationSummary.trim()}`;
+  }
 
-  const relevantMessages = messages
-    .filter((m) => m.sender === 'user' || m.sender === 'assistant')
-    .slice(-14);
+  // Stage 11.2: Budget short-term memory
+  const { budgetedMessages } = budgetShortTermMemory(messages, {
+    maxTurns: maxHistoryTurns ?? 3,
+  });
 
   const ollamaMessages: OllamaChatMessage[] = [
     { role: 'system', content: systemPrompt },
-    ...relevantMessages.map((m) => ({
-      role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+    ...budgetedMessages.map((m) => ({
+      role: ((m.role || m.sender) === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
       content: m.content,
     })),
   ];
@@ -311,8 +293,8 @@ export const generateChatResponse = async (
       errorInfo.code !== 'CORS_ERROR'
     ) {
       try {
-        const dialogHistory = relevantMessages
-          .map((m) => `${m.sender === 'user' ? 'Student' : 'Tutor'}: ${m.content}`)
+        const dialogHistory = budgetedMessages
+          .map((m) => `${(m.role || m.sender) === 'user' ? 'Student' : 'Tutor'}: ${m.content}`)
           .join('\n\n');
 
         const fallbackPrompt = `${dialogHistory}\n\nTutor:`;
@@ -386,56 +368,16 @@ export const sendChatMessage = async (
 // Firestore Conversation Persistence Layer (Private to Authenticated User)
 // =========================================================================
 
+// =========================================================================
+// Firestore Conversation Persistence Layer (Private to Authenticated User)
+// Delegated to conversationHistoryService with subcollection & memory support
+// =========================================================================
+
 /**
  * Fetch all saved study conversations for an authenticated user, ordered by most recently updated.
  */
 export const getConversations = async (userId: string): Promise<ChatSession[]> => {
-  if (!userId) return [];
-
-  try {
-    const colRef = getUserConversationsCollection(userId);
-    const q = query(colRef, orderBy('updatedAt', 'desc'));
-    const snapshot = await getDocs(q);
-
-    return snapshot.docs.map((docSnap) => {
-      const data = docSnap.data();
-      return {
-        id: docSnap.id,
-        userId,
-        title: data.title || `${data.scope?.subjectName || 'Study'} Session`,
-        scope: data.scope as ChatStudyScope,
-        messages: Array.isArray(data.messages) ? data.messages : [],
-        createdAt: formatTimestamp(data.createdAt),
-        updatedAt: formatTimestamp(data.updatedAt),
-      };
-    });
-  } catch (error: unknown) {
-    const err = error as { code?: string; message?: string };
-    console.error('Error fetching conversations:', err);
-
-    // Fallback without orderBy in case composite index is not yet built
-    try {
-      const colRef = getUserConversationsCollection(userId);
-      const snapshot = await getDocs(colRef);
-      const list: ChatSession[] = snapshot.docs.map((docSnap) => {
-        const data = docSnap.data();
-        return {
-          id: docSnap.id,
-          userId,
-          title: data.title || `${data.scope?.subjectName || 'Study'} Session`,
-          scope: data.scope as ChatStudyScope,
-          messages: Array.isArray(data.messages) ? data.messages : [],
-          createdAt: formatTimestamp(data.createdAt),
-          updatedAt: formatTimestamp(data.updatedAt),
-        };
-      });
-      return list.sort(
-        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      );
-    } catch {
-      return [];
-    }
-  }
+  return getUserConversations(userId);
 };
 
 /**
@@ -445,27 +387,7 @@ export const getConversationById = async (
   userId: string,
   conversationId: string
 ): Promise<ChatSession | null> => {
-  if (!userId || !conversationId) return null;
-
-  try {
-    const docRef = doc(db, 'users', userId, 'conversations', conversationId);
-    const snap = await getDoc(docRef);
-    if (!snap.exists()) return null;
-
-    const data = snap.data();
-    return {
-      id: snap.id,
-      userId,
-      title: data.title || `${data.scope?.subjectName || 'Study'} Session`,
-      scope: data.scope as ChatStudyScope,
-      messages: Array.isArray(data.messages) ? data.messages : [],
-      createdAt: formatTimestamp(data.createdAt),
-      updatedAt: formatTimestamp(data.updatedAt),
-    };
-  } catch (err) {
-    console.error('Error fetching conversation by id:', err);
-    return null;
-  }
+  return getConversation(userId, conversationId);
 };
 
 /**
@@ -477,33 +399,7 @@ export const createConversation = async (
   initialMessages: ChatMessage[] = [],
   title?: string
 ): Promise<ChatSession> => {
-  if (!userId) {
-    throw new Error('User ID is required to create a conversation.');
-  }
-
-  const colRef = getUserConversationsCollection(userId);
-  const now = new Date().toISOString();
-  const sessionTitle =
-    title?.trim() || `${scope.subjectName} Study Session`;
-
-  const docRef = await addDoc(colRef, {
-    userId,
-    title: sessionTitle,
-    scope,
-    messages: initialMessages,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-
-  return {
-    id: docRef.id,
-    userId,
-    title: sessionTitle,
-    scope,
-    messages: initialMessages,
-    createdAt: now,
-    updatedAt: now,
-  };
+  return createNewConversation(userId, scope, initialMessages, title);
 };
 
 /**
@@ -514,22 +410,11 @@ export const saveConversation = async (
   session: ChatSession
 ): Promise<void> => {
   if (!userId || !session.id) return;
-
-  try {
-    const docRef = doc(db, 'users', userId, 'conversations', session.id);
-    await setDoc(
-      docRef,
-      {
-        userId,
-        title: session.title || `${session.scope.subjectName} Session`,
-        scope: session.scope,
-        messages: session.messages,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
-  } catch (err) {
-    console.error('Error saving conversation to Firestore:', err);
+  const lastMsg = session.messages.length > 0
+    ? session.messages[session.messages.length - 1]
+    : undefined;
+  if (lastMsg) {
+    await appendConversationMessage(userId, session.id, lastMsg, session.messages);
   }
 };
 
@@ -543,19 +428,12 @@ export const saveConversationMessages = async (
   newTitle?: string
 ): Promise<void> => {
   if (!userId || !conversationId) return;
-
-  try {
-    const docRef = doc(db, 'users', userId, 'conversations', conversationId);
-    const payload: Record<string, unknown> = {
-      messages,
-      updatedAt: serverTimestamp(),
-    };
-    if (newTitle) {
-      payload.title = newTitle.trim();
-    }
-    await setDoc(docRef, payload, { merge: true });
-  } catch (err) {
-    console.error('Error updating conversation messages:', err);
+  const lastMsg = messages.length > 0 ? messages[messages.length - 1] : undefined;
+  if (lastMsg) {
+    await appendConversationMessage(userId, conversationId, lastMsg, messages);
+  }
+  if (newTitle) {
+    await renameConversationRecord(userId, conversationId, newTitle);
   }
 };
 
@@ -566,8 +444,47 @@ export const deleteConversation = async (
   userId: string,
   conversationId: string
 ): Promise<void> => {
-  if (!userId || !conversationId) return;
+  return deleteConversationRecord(userId, conversationId);
+};
 
-  const docRef = doc(db, 'users', userId, 'conversations', conversationId);
-  await deleteDoc(docRef);
+/**
+ * Rename a conversation in Firestore.
+ */
+export const renameConversation = async (
+  userId: string,
+  conversationId: string,
+  newTitle: string
+): Promise<void> => {
+  return renameConversationRecord(userId, conversationId, newTitle);
+};
+
+/**
+ * Clears conversation history and memory while preserving session.
+ */
+export const clearConversationHistory = async (
+  userId: string,
+  conversationId: string
+): Promise<void> => {
+  return clearConversationHistoryRecord(userId, conversationId);
+};
+
+/**
+ * Updates long-term conversation memory summary and topics.
+ */
+export const updateConversationMemorySummary = async (
+  userId: string,
+  conversationId: string,
+  summaryText: string,
+  topics?: string[],
+  unresolvedQuestions?: string[],
+  lastSummarizedIndex?: number
+): Promise<void> => {
+  return updateConversationMemorySummaryRecord(
+    userId,
+    conversationId,
+    summaryText,
+    topics,
+    unresolvedQuestions,
+    lastSummarizedIndex
+  );
 };

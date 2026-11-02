@@ -31,3 +31,6 @@ dist-ssr
 venv
 chroma_data
 
+# Firebase cache
+.firebase/
+

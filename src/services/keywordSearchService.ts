@@ -2,7 +2,7 @@
 // Stage 9: Advanced RAG - Hybrid Retrieval
 // 100% Free, Local, High-Performance Lexical Search
 
-import type { ChromaRecord } from '../types/chroma';
+import type { ChromaRecord, ChromaVectorMetadata } from '../types/chroma';
 import type {
   SemanticSearchResultItem,
   SemanticSearchFilters,
@@ -195,30 +195,49 @@ export const chromaRecordToSearchResultItem = (
   record: ChromaRecord,
   similarity = 1.0
 ): SemanticSearchResultItem => {
-  const meta = record.metadata || {};
-  const pageNumber = typeof meta.pageNumber === 'number' ? meta.pageNumber : 1;
-  const pageEndNumber = typeof meta.pageEndNumber === 'number' ? meta.pageEndNumber : undefined;
+  const rawMeta = (record.metadata || {}) as Partial<ChromaVectorMetadata>;
+  const pageNumber = typeof rawMeta.pageNumber === 'number' ? rawMeta.pageNumber : 1;
+  const pageEndNumber = typeof rawMeta.pageEndNumber === 'number' ? rawMeta.pageEndNumber : undefined;
   const pageRange =
-    typeof meta.pageRange === 'string'
-      ? meta.pageRange
+    typeof rawMeta.pageRange === 'string'
+      ? rawMeta.pageRange
       : pageEndNumber && pageEndNumber > pageNumber
       ? `${pageNumber}–${pageEndNumber}`
       : undefined;
 
-  return {
+  const metadata: ChromaVectorMetadata = {
     chunkId: record.id,
-    text: record.text,
-    resourceId: (meta.resourceId as string) || '',
-    resourceName: (meta.resourceName as string) || 'Document.pdf',
-    subjectId: (meta.subjectId as string) || '',
-    moduleId: (meta.moduleId as string) || undefined,
+    subjectId: (rawMeta.subjectId as string) || '',
+    moduleId: (rawMeta.moduleId as string) || '',
+    resourceId: (rawMeta.resourceId as string) || '',
+    resourceName: (rawMeta.resourceName as string) || 'Document.pdf',
     pageNumber,
     pageEndNumber,
     pageRange,
-    chunkIndex: typeof meta.chunkIndex === 'number' ? meta.chunkIndex : 0,
+    chunkIndex: typeof rawMeta.chunkIndex === 'number' ? rawMeta.chunkIndex : 0,
+    totalChunks: typeof rawMeta.totalChunks === 'number' ? rawMeta.totalChunks : 1,
+    tokenCount: typeof rawMeta.tokenCount === 'number' ? rawMeta.tokenCount : 0,
+    characterCount:
+      typeof rawMeta.characterCount === 'number'
+        ? rawMeta.characterCount
+        : (record.text || '').length,
+    ...rawMeta,
+  };
+
+  return {
+    chunkId: record.id,
+    text: record.text,
+    resourceId: metadata.resourceId || '',
+    resourceName: metadata.resourceName || 'Document.pdf',
+    subjectId: metadata.subjectId || '',
+    moduleId: metadata.moduleId || undefined,
+    pageNumber,
+    pageEndNumber,
+    pageRange,
+    chunkIndex: metadata.chunkIndex,
     distance: parseFloat((1.0 - similarity).toFixed(4)),
     similarity,
-    metadata: meta,
+    metadata,
   };
 };
 

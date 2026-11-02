@@ -25,6 +25,8 @@ import {
   Clock,
   FileText,
   CheckCircle2,
+  Pencil,
+  Eraser,
 } from 'lucide-react';
 import { Button } from '../../components/common/Button';
 import type { Subject } from '../../types/subject';
@@ -38,7 +40,15 @@ import {
   saveConversationMessages,
   getConversations,
   deleteConversation,
+  renameConversation,
+  clearConversationHistory,
+  updateConversationMemorySummary,
 } from '../../services/chatService';
+import {
+  generateConversationTitle,
+  shouldTriggerSummarization,
+  summarizeConversationMemory,
+} from '../../services/conversationMemoryService';
 import { resolveCitationNavigation } from '../../services/citationService';
 import { getSelectedModel, parseOllamaError } from '../../services/ollamaService';
 import { ChatMessageContent } from './ChatMessageContent';
@@ -87,6 +97,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
+  const [renameInputText, setRenameInputText] = useState('');
 
   const [activeModel, setActiveModel] = useState<string>('llama3.2:3b');
 
@@ -251,11 +263,39 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       if (activeSessionId) {
         await saveConversationMessages(user.uid, activeSessionId, allMessages);
         loadConversations();
+
+        // 11.3: Background incremental long-term memory summarization
+        const currConv = conversations.find((c) => c.id === activeSessionId);
+        const lastIdx = currConv?.lastSummarizedMessageIndex ?? 0;
+        if (shouldTriggerSummarization(allMessages, lastIdx, 4)) {
+          summarizeConversationMemory(allMessages, currConv?.summary)
+            .then(async (summary) => {
+              if (summary.summaryText && user.uid) {
+                await updateConversationMemorySummary(
+                  user.uid,
+                  activeSessionId,
+                  summary.summaryText,
+                  summary.topics,
+                  summary.unresolvedQuestions,
+                  summary.lastMessageCount
+                );
+                loadConversations();
+              }
+            })
+            .catch((err) => console.warn('Incremental conversation summarization warning:', err));
+        }
+
         return activeSessionId;
       } else {
-        const title = firstQuestionText
-          ? `${scope.subjectName}: ${firstQuestionText.slice(0, 36)}${firstQuestionText.length > 36 ? '...' : ''}`
-          : `${scope.subjectName} Study Session`;
+        // 11.5: Automated intelligent title generation
+        let title: string;
+        try {
+          title = await generateConversationTitle(firstQuestionText || '', scope.subjectName);
+        } catch {
+          title = firstQuestionText
+            ? `${scope.subjectName}: ${firstQuestionText.slice(0, 36)}${firstQuestionText.length > 36 ? '...' : ''}`
+            : `${scope.subjectName} Study Session`;
+        }
 
         const newSession = await createConversation(user.uid, scope, allMessages, title);
         setSessionId(newSession.id);
@@ -265,6 +305,38 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     } catch (err) {
       console.error('Error persisting conversation:', err);
       return activeSessionId;
+    }
+  };
+
+  // Clear current conversation messages & memory
+  const handleClearCurrentSession = async () => {
+    if (messages.length === 0) return;
+    if (!window.confirm('Clear all messages and context in this conversation?')) {
+      return;
+    }
+    if (user.uid && sessionId) {
+      try {
+        await clearConversationHistory(user.uid, sessionId);
+        setMessages([]);
+        loadConversations();
+      } catch (err) {
+        console.error('Failed to clear conversation history:', err);
+      }
+    } else {
+      setMessages([]);
+    }
+  };
+
+  // Rename a conversation
+  const handleRenameSession = async (convId: string, newTitle: string) => {
+    if (!user.uid || !convId || !newTitle.trim()) return;
+    try {
+      await renameConversation(user.uid, convId, newTitle.trim());
+      setConversations((prev) =>
+        prev.map((c) => (c.id === convId ? { ...c, title: newTitle.trim() } : c))
+      );
+    } catch (err) {
+      console.error('Failed to rename conversation:', err);
     }
   };
 
@@ -323,14 +395,19 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
+    // Look up active conversation's persistent memory
+    const activeConv = conversations.find((c) => c.id === sessionId);
+
     try {
-      // 2. Request real response from Ollama with progressive streaming enabled
+      // 2. Request real response from Ollama with progressive streaming & memory context
       const result = await generateChatResponse({
         messages: updatedWithUser,
         scope,
         studentId: user.uid,
         abortSignal: controller.signal,
         stream: true,
+        conversationSummary: activeConv?.summary,
+        memoryTopics: activeConv?.memoryTopics,
         onChunk: (_chunk, accumulated) => {
           accumulatedText = accumulated;
           setMessages((prev) =>
@@ -632,6 +709,10 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     return () => window.removeEventListener('keydown', handleGlobalShortcuts);
   }, []);
 
+  const activeConv = useMemo(
+    () => conversations.find((c) => c.id === sessionId),
+    [conversations, sessionId]
+  );
   const isEntire = scope.scopeMode === 'entire_subject';
   const lastAssistantIndex = messages.findLastIndex((m) => m.sender === 'assistant');
 
@@ -710,7 +791,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
           zIndex: 10,
         }}
       >
-        {/* Header Left: Bot Icon + Title + Model Badge */}
+        {/* Header Left: Bot Icon + Title + Model Badge + Memory Badge */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
           <div
             style={{
@@ -770,11 +851,57 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
               <Cpu size={10} />
               <span><span className="chatbot-header-full-text">Llama </span>3.2 3B</span>
             </span>
+
+            {/* Stage 11: Long-Term Memory Active Pill */}
+            {activeConv?.summary && (
+              <span
+                style={{
+                  fontSize: '0.68rem',
+                  fontWeight: 600,
+                  padding: '2px 7px',
+                  borderRadius: 'var(--radius-full)',
+                  background: 'rgba(99, 102, 241, 0.12)',
+                  color: 'var(--accent-primary)',
+                  border: '1px solid rgba(99, 102, 241, 0.25)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  whiteSpace: 'nowrap',
+                }}
+                title={`Retained Long-Term Memory:\n${activeConv.summary}`}
+              >
+                <Sparkles size={10} />
+                <span>Memory Active</span>
+              </span>
+            )}
           </div>
         </div>
 
         {/* Header Right: Actions + Scope Pills */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+          {/* Clear Current Session Button */}
+          {messages.length > 0 && (
+            <Button
+              variant="secondary"
+              size="sm"
+              type="button"
+              onClick={handleClearCurrentSession}
+              title="Clear conversation history and memory in current session"
+              style={{
+                height: '30px',
+                padding: '0 8px',
+                fontSize: '0.76rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                color: 'var(--text-muted)',
+              }}
+            >
+              <Eraser size={13} />
+              <span>Clear</span>
+            </Button>
+          )}
+
           {/* New Chat Button */}
           <Button
             variant="secondary"
@@ -1843,6 +1970,94 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     day: 'numeric',
                   });
 
+                  const isRenaming = renamingSessionId === conv.id;
+
+                  if (isRenaming) {
+                    return (
+                      <div
+                        key={conv.id}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: 'var(--radius-md)',
+                          background: 'var(--bg-tertiary)',
+                          border: '1px solid var(--accent-primary)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                        }}
+                      >
+                        <input
+                          type="text"
+                          autoFocus
+                          value={renameInputText}
+                          onChange={(e) => setRenameInputText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              if (renameInputText.trim()) {
+                                handleRenameSession(conv.id, renameInputText.trim());
+                              }
+                              setRenamingSessionId(null);
+                            } else if (e.key === 'Escape') {
+                              setRenamingSessionId(null);
+                            }
+                          }}
+                          style={{
+                            flex: 1,
+                            fontSize: '0.82rem',
+                            padding: '4px 8px',
+                            borderRadius: 'var(--radius-xs)',
+                            border: '1px solid var(--border-subtle)',
+                            background: 'var(--bg-input)',
+                            color: 'var(--text-primary)',
+                            outline: 'none',
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (renameInputText.trim()) {
+                              handleRenameSession(conv.id, renameInputText.trim());
+                            }
+                            setRenamingSessionId(null);
+                          }}
+                          title="Save title"
+                          style={{
+                            background: 'var(--accent-primary)',
+                            border: 'none',
+                            color: '#ffffff',
+                            cursor: 'pointer',
+                            padding: '4px 6px',
+                            borderRadius: 'var(--radius-xs)',
+                            display: 'flex',
+                          }}
+                        >
+                          <Check size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRenamingSessionId(null);
+                          }}
+                          title="Cancel"
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'var(--text-muted)',
+                            cursor: 'pointer',
+                            padding: '4px',
+                            display: 'flex',
+                          }}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    );
+                  }
+
                   return (
                     <div
                       key={conv.id}
@@ -1884,22 +2099,42 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                           {conv.title || 'Study Session'}
                         </span>
 
-                        <button
-                          type="button"
-                          onClick={(e) => handleDeleteSession(conv.id, e)}
-                          disabled={deletingSessionId === conv.id}
-                          style={{
-                            background: 'transparent',
-                            border: 'none',
-                            color: 'var(--text-muted)',
-                            cursor: 'pointer',
-                            padding: '2px',
-                            flexShrink: 0,
-                          }}
-                          title="Delete conversation"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRenamingSessionId(conv.id);
+                              setRenameInputText(conv.title || 'Study Session');
+                            }}
+                            title="Rename conversation"
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: 'var(--text-muted)',
+                              cursor: 'pointer',
+                              padding: '2px',
+                            }}
+                          >
+                            <Pencil size={12} />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteSession(conv.id, e)}
+                            disabled={deletingSessionId === conv.id}
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: 'var(--text-muted)',
+                              cursor: 'pointer',
+                              padding: '2px',
+                            }}
+                            title="Delete conversation"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </div>
 
                       <div
@@ -1914,6 +2149,26 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                           <BookOpen size={11} />
                           {conv.scope?.subjectCode || conv.scope?.subjectName || 'Course'}
+                          {conv.summary && (
+                            <span
+                              title="Long-term study memory retained"
+                              style={{
+                                fontSize: '0.62rem',
+                                fontWeight: 600,
+                                background: 'rgba(99, 102, 241, 0.12)',
+                                color: 'var(--accent-primary)',
+                                padding: '1px 5px',
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '2px',
+                                marginLeft: '4px',
+                              }}
+                            >
+                              <Sparkles size={8} />
+                              <span>Memory</span>
+                            </span>
+                          )}
                         </span>
 
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>

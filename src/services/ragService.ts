@@ -153,8 +153,12 @@ MANDATORY GROUNDING RULES:
       )
     : '';
 
-  const historySection = formattedHistory
-    ? `### RECENT CONVERSATION CONTEXT (Informational dialogue context only - NOT academic evidence):\n${formattedHistory}\n\n---\n\n`
+  const summaryPart = options?.conversationSummary && options.conversationSummary.trim().length > 0
+    ? `### LONG-TERM CONVERSATION MEMORY (Prior topics and concepts discussed in this study session):\n${options.conversationSummary.trim()}\n\n`
+    : '';
+
+  const historySection = (formattedHistory || summaryPart)
+    ? `${summaryPart}${formattedHistory ? `### RECENT CONVERSATION CONTEXT (Informational dialogue context only - NOT academic evidence):\n${formattedHistory}\n\n` : ''}---\n\n`
     : '';
 
   const userPrompt = `${historySection}### VERIFIED DOCUMENT EXCERPTS (Primary Academic Evidence):
@@ -259,21 +263,22 @@ export const generateRagAnswer = async (
   let condensationDurationMs = 0;
   let condensedQuestion: string | undefined = undefined;
 
-  const shouldCondense =
-    options?.enableQueryCondensation !== false &&
-    Array.isArray(options?.conversationHistory) &&
-    options.conversationHistory.length > 0;
+  const hasHistory = Array.isArray(options?.conversationHistory) && options.conversationHistory.length > 0;
+  const hasSummary = Boolean(options?.conversationSummary && options.conversationSummary.trim().length > 0);
+  const shouldCondense = options?.enableQueryCondensation !== false && (hasHistory || hasSummary);
 
-  if (shouldCondense && options?.conversationHistory) {
+  if (shouldCondense) {
     try {
       const condensationResult = await condenseQuestion(
         cleanQuestion,
-        options.conversationHistory,
+        options?.conversationHistory || [],
         {
           model,
           maxHistoryTurns: options?.maxHistoryTurns,
           customBaseUrl: options?.customOllamaUrl,
           abortSignal: options?.abortSignal,
+          conversationSummary: options?.conversationSummary,
+          memoryTopics: options?.memoryTopics,
         }
       );
 

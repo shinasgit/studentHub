@@ -18,10 +18,23 @@ service cloud.firestore {
       // Students can only read and write their own profile
       allow read, write: if isOwner(userId);
 
+      // Conversations subcollection: users/{userId}/conversations/{conversationId}
+      match /conversations/{conversationId} {
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId) && (!('userId' in request.resource.data) || request.resource.data.userId == userId);
+
+        // Messages subcollection: users/{userId}/conversations/{conversationId}/messages/{messageId}
+        match /messages/{messageId} {
+          allow read, delete: if isOwner(userId);
+          allow create, update: if isOwner(userId);
+        }
+      }
+
       // Subjects subcollection: users/{userId}/subjects/{subjectId}
       match /subjects/{subjectId} {
         // Enforce that only the authenticating owner can read, create, update, or delete subjects
-        allow read, write: if isOwner(userId);
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId) && (!('userId' in request.resource.data) || request.resource.data.userId == userId);
 
         // Modules subcollection: users/{userId}/subjects/{subjectId}/modules/{moduleId}
         match /modules/{moduleId} {
@@ -31,7 +44,8 @@ service cloud.firestore {
 
       // Personal Notes subcollection: users/{userId}/notes/{noteId}
       match /notes/{noteId} {
-        allow read, write: if isOwner(userId);
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId) && (!('userId' in request.resource.data) || request.resource.data.userId == userId);
       }
 
       // Flashcards subcollection: users/{userId}/flashcards/{flashcardId}
@@ -46,7 +60,8 @@ service cloud.firestore {
 
       // Resources subcollection: users/{userId}/resources/{resourceId}
       match /resources/{resourceId} {
-        allow read, write: if isOwner(userId);
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId) && (!('userId' in request.resource.data) || request.resource.data.userId == userId);
       }
 
       // Restrict all other user-scoped subcollections

@@ -14,6 +14,8 @@ export interface QueryCondensationOptions {
   maxHistoryTurns?: number;
   customBaseUrl?: string;
   abortSignal?: AbortSignal;
+  conversationSummary?: string;
+  memoryTopics?: string[];
 }
 
 export interface QueryCondensationResult {
@@ -166,7 +168,9 @@ export const condenseQuestion = async (
     options?.maxHistoryTurns ?? DEFAULT_MAX_HISTORY_TURNS
   );
 
-  if (!formattedHistory) {
+  const hasSummary = Boolean(options?.conversationSummary && options.conversationSummary.trim().length > 0);
+
+  if (!formattedHistory && !hasSummary) {
     return {
       condensedQuestion: cleanQuestion,
       originalQuestion: cleanQuestion,
@@ -177,11 +181,15 @@ export const condenseQuestion = async (
 
   const model = options?.model || getSelectedModel() || DEFAULT_CONDENSATION_MODEL;
 
-  // 2. Build condensation prompt
+  // 2. Build condensation prompt incorporating recent turns and persistent memory summary
+  const summaryBlock = hasSummary
+    ? `Prior Session Topics & Summary:\n${options!.conversationSummary!.trim()}\n\n`
+    : '';
+
   const condensationPrompt = `${CONDENSATION_SYSTEM_PROMPT}
 
-Chat History:
-${formattedHistory}
+${summaryBlock}Chat History:
+${formattedHistory || '(No immediate prior messages - use Prior Session Topics if applicable)'}
 
 Follow-up Question: ${cleanQuestion}
 Standalone Question:`;

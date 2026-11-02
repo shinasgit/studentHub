@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "vite-node scripts/test_web_and_mcq_fixes.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start:server": "tsx server/index.ts",
+    "dev:server": "tsx watch server/index.ts"
   },
   "dependencies": {
     "firebase": "^13.0.0",
@@ -17,7 +19,8 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.4",
-    "tesseract.js": "^7.0.0"
+    "tesseract.js": "^7.0.0",
+    "tsx": "^4.23.15"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

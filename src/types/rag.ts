@@ -121,6 +121,14 @@ export interface RagAnswerOptions {
    */
   conversationHistory?: RagConversationMessage[];
   /**
+   * Stage 11: Long-term conversation memory summary for context-aware multi-turn guidance.
+   */
+  conversationSummary?: string;
+  /**
+   * Stage 11: Topics explored in earlier turns of the conversation session.
+   */
+  memoryTopics?: string[];
+  /**
    * Maximum number of recent history turns (user + assistant pairs) to include. Default: 3 (6 messages).
    */
   maxHistoryTurns?: number;

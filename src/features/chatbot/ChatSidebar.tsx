@@ -10,6 +10,8 @@ import {
   Sparkles,
   BookOpen,
   Cpu,
+  Pencil,
+  Check,
 } from 'lucide-react';
 import type { ChatSession } from '../../types/chat';
 
@@ -24,6 +26,7 @@ interface ChatSidebarProps {
   onSelectSession: (session: ChatSession) => void;
   onNewChat: () => void;
   onDeleteSession: (sessionId: string, e: React.MouseEvent) => void;
+  onRenameSession?: (sessionId: string, newTitle: string) => void;
   isMobile: boolean;
 }
 
@@ -38,10 +41,13 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
   onSelectSession,
   onNewChat,
   onDeleteSession,
+  onRenameSession,
   isMobile,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
 
   // Filter conversations by search query
   const filteredConversations = useMemo(() => {
@@ -306,6 +312,93 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
               {group.items.map((conv) => {
                 const isActive = conv.id === activeSessionId;
                 const isHovered = hoveredSessionId === conv.id;
+                const isEditing = editingSessionId === conv.id;
+
+                if (isEditing) {
+                  return (
+                    <div
+                      key={conv.id}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        padding: '6px 8px',
+                        borderRadius: 'var(--radius-sm)',
+                        background: 'var(--bg-tertiary)',
+                        border: '1px solid var(--accent-primary)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <input
+                        type="text"
+                        autoFocus
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (editTitle.trim() && onRenameSession) {
+                              onRenameSession(conv.id, editTitle.trim());
+                            }
+                            setEditingSessionId(null);
+                          } else if (e.key === 'Escape') {
+                            setEditingSessionId(null);
+                          }
+                        }}
+                        style={{
+                          flex: 1,
+                          fontSize: '0.80rem',
+                          padding: '3px 6px',
+                          borderRadius: 'var(--radius-xs)',
+                          border: '1px solid var(--border-subtle)',
+                          background: 'var(--bg-input)',
+                          color: 'var(--text-primary)',
+                          outline: 'none',
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (editTitle.trim() && onRenameSession) {
+                            onRenameSession(conv.id, editTitle.trim());
+                          }
+                          setEditingSessionId(null);
+                        }}
+                        title="Save title"
+                        style={{
+                          background: 'var(--accent-primary)',
+                          border: 'none',
+                          color: '#ffffff',
+                          cursor: 'pointer',
+                          padding: '3px 5px',
+                          borderRadius: 'var(--radius-xs)',
+                          display: 'flex',
+                        }}
+                      >
+                        <Check size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingSessionId(null);
+                        }}
+                        title="Cancel"
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'var(--text-muted)',
+                          cursor: 'pointer',
+                          padding: '3px',
+                          display: 'flex',
+                        }}
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  );
+                }
 
                 return (
                   <div
@@ -358,51 +451,111 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
                           {conv.title || 'Study Session'}
                         </div>
 
-                        {conv.scope?.subjectCode && (
-                          <div
-                            style={{
-                              fontSize: '0.68rem',
-                              color: 'var(--text-muted)',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '3px',
-                              marginTop: '1px',
-                            }}
-                          >
-                            <BookOpen size={10} />
-                            <span>{conv.scope.subjectCode}</span>
-                          </div>
-                        )}
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            marginTop: '2px',
+                          }}
+                        >
+                          {conv.scope?.subjectCode && (
+                            <span
+                              style={{
+                                fontSize: '0.68rem',
+                                color: 'var(--text-muted)',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                              }}
+                            >
+                              <BookOpen size={10} />
+                              <span>{conv.scope.subjectCode}</span>
+                            </span>
+                          )}
+
+                          {conv.summary && (
+                            <span
+                              title="Long-term study memory retained"
+                              style={{
+                                fontSize: '0.62rem',
+                                fontWeight: 600,
+                                background: 'rgba(99, 102, 241, 0.12)',
+                                color: 'var(--accent-primary)',
+                                padding: '1px 5px',
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '2px',
+                              }}
+                            >
+                              <Sparkles size={8} />
+                              <span>Memory</span>
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
-                    {/* Delete action button on hover */}
+                    {/* Action buttons on hover */}
                     {(isHovered || isMobile) && (
-                      <button
-                        type="button"
-                        onClick={(e) => onDeleteSession(conv.id, e)}
-                        title="Delete conversation"
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          color: 'var(--text-muted)',
-                          cursor: 'pointer',
-                          padding: '4px',
-                          borderRadius: 'var(--radius-xs)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0,
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.color = 'var(--color-danger)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.color = 'var(--text-muted)';
-                        }}
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+                        {onRenameSession && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingSessionId(conv.id);
+                              setEditTitle(conv.title || 'Study Session');
+                            }}
+                            title="Rename conversation"
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: 'var(--text-muted)',
+                              cursor: 'pointer',
+                              padding: '4px',
+                              borderRadius: 'var(--radius-xs)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.color = 'var(--accent-primary)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.color = 'var(--text-muted)';
+                            }}
+                          >
+                            <Pencil size={12} />
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={(e) => onDeleteSession(conv.id, e)}
+                          title="Delete conversation"
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'var(--text-muted)',
+                            cursor: 'pointer',
+                            padding: '4px',
+                            borderRadius: 'var(--radius-xs)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.color = 'var(--color-danger)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.color = 'var(--text-muted)';
+                          }}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     )}
                   </div>
                 );

@@ -27,6 +27,7 @@ export interface ChatMessage {
   modelUsed?: string;
   durationMs?: number;
   sources?: RagSourceReference[];
+  role?: 'user' | 'assistant' | 'system';
   isRagGrounded?: boolean;
   retrievalDurationMs?: number;
   generationDurationMs?: number;
@@ -37,6 +38,23 @@ export interface ChatMessage {
   timeToFirstTokenMs?: number;
 }
 
+export interface ConversationSummary {
+  summaryText: string;
+  topics: string[];
+  conceptsExplained: string[];
+  unresolvedQuestions: string[];
+  lastMessageCount: number;
+  updatedAt: string;
+}
+
+export interface ConversationMemoryContext {
+  shortTermTurns: ChatMessage[];
+  longTermSummary?: string;
+  topics?: string[];
+  unresolvedQuestions?: string[];
+  formattedContextPrompt: string;
+}
+
 export interface ChatSession {
   id: string;
   userId: string;
@@ -45,6 +63,12 @@ export interface ChatSession {
   messages: ChatMessage[];
   createdAt: string;
   updatedAt: string;
+  summary?: string;
+  lastMessage?: string;
+  messageCount?: number;
+  memoryTopics?: string[];
+  unresolvedQuestions?: string[];
+  lastSummarizedMessageIndex?: number;
 }
 
 export interface GenerateChatResponseOptions {
@@ -64,6 +88,8 @@ export interface GenerateChatResponseOptions {
   collectionName?: string;
   maxHistoryTurns?: number;
   enableQueryCondensation?: boolean;
+  conversationSummary?: string;
+  memoryTopics?: string[];
   stream?: boolean;
   onChunk?: (chunk: string, accumulated: string) => void;
 }

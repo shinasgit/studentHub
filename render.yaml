@@ -1,0 +1,22 @@
+# Render Infrastructure Blueprint for AI Student Hub Backend API
+# Deploys cloud-compatible Node.js backend (Web extraction, SSRF defense, health check)
+# Keeps local AI operations (Ollama, ChromaDB) private on student laptop.
+
+services:
+  - type: web
+    name: ai-student-hub-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run start:server
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FIREBASE_PROJECT_ID
+        value: studenthub-36f7a
+      - key: ALLOWED_ORIGINS
+        value: https://studenthub-36f7a.web.app,https://studenthub-36f7a.firebaseapp.com
+      - key: ENABLE_LOCAL_AI_PROXIES
+        value: "false"

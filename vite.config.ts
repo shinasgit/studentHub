@@ -1,18 +1,18 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite'
-import { handleExtractWebRequest } from './server/webExtractorMiddleware.ts'
+import { handleSecureApiRequest } from './server/secureApiRouter.ts'
 
-function webExtractorPlugin(): Plugin {
+function secureBackendPlugin(): Plugin {
   return {
-    name: 'web-extractor-plugin',
+    name: 'secure-backend-plugin',
     configureServer(server) {
-      server.middlewares.use('/api/extract-web', (req, res) => {
-        handleExtractWebRequest(req, res)
+      server.middlewares.use('/api', (req, res) => {
+        handleSecureApiRequest(req, res)
       })
     },
     configurePreviewServer(server) {
-      server.middlewares.use('/api/extract-web', (req, res) => {
-        handleExtractWebRequest(req, res)
+      server.middlewares.use('/api', (req, res) => {
+        handleSecureApiRequest(req, res)
       })
     },
   }
@@ -20,7 +20,7 @@ function webExtractorPlugin(): Plugin {
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), webExtractorPlugin()],
+  plugins: [react(), secureBackendPlugin()],
   server: {
     proxy: {
       '/api/ollama': {
