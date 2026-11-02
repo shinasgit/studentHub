@@ -5,12 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "node scripts/build.mjs",
+    "build:client": "tsc -b && vite build",
+    "start": "tsx server/index.ts",
+    "start:server": "tsx server/index.ts",
+    "dev:server": "tsx watch server/index.ts",
     "lint": "eslint .",
     "test": "vite-node scripts/test_web_and_mcq_fixes.mjs",
-    "preview": "vite preview",
-    "start:server": "tsx server/index.ts",
-    "dev:server": "tsx watch server/index.ts"
+    "preview": "vite preview"
   },
   "dependencies": {
     "firebase": "^13.0.0",
