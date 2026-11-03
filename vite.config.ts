@@ -6,13 +6,34 @@ function secureBackendPlugin(): Plugin {
   return {
     name: 'secure-backend-plugin',
     configureServer(server) {
-      server.middlewares.use('/api', (req, res) => {
-        handleSecureApiRequest(req, res)
+      server.middlewares.use((req, res, next) => {
+        const url = req.url || ''
+        // Intercept cloud backend and secure endpoints; let Vite proxy handle /api/ollama and /api/chroma
+        if (
+          url === '/health' ||
+          url.startsWith('/api/health') ||
+          url.startsWith('/api/extract-web') ||
+          url.startsWith('/api/secure')
+        ) {
+          handleSecureApiRequest(req, res)
+          return
+        }
+        next()
       })
     },
     configurePreviewServer(server) {
-      server.middlewares.use('/api', (req, res) => {
-        handleSecureApiRequest(req, res)
+      server.middlewares.use((req, res, next) => {
+        const url = req.url || ''
+        if (
+          url === '/health' ||
+          url.startsWith('/api/health') ||
+          url.startsWith('/api/extract-web') ||
+          url.startsWith('/api/secure')
+        ) {
+          handleSecureApiRequest(req, res)
+          return
+        }
+        next()
       })
     },
   }

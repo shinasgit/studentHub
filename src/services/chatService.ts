@@ -19,6 +19,7 @@ import {
   parseOllamaError,
 } from './ollamaService';
 import { generateRagAnswer } from './ragService';
+import type { RagAnswerResult } from '../types/rag';
 import { budgetShortTermMemory } from './conversationMemoryService';
 import {
   getUserConversations,
@@ -167,6 +168,8 @@ export const generateChatResponse = async (
   const resolvedStudentId =
     providedStudentId || (typeof window !== 'undefined' ? auth?.currentUser?.uid : undefined);
 
+  let ragResult: RagAnswerResult | undefined;
+
   if (
     enableRag &&
     latestUserMessage &&
@@ -174,7 +177,7 @@ export const generateChatResponse = async (
     resolvedStudentId &&
     scope?.subjectId
   ) {
-    const ragResult = await generateRagAnswer(
+    ragResult = await generateRagAnswer(
       latestUserMessage.content,
       scope,
       resolvedStudentId,
@@ -203,24 +206,42 @@ export const generateChatResponse = async (
       throw new Error(ragResult.error || 'Failed to generate grounded RAG answer.');
     }
 
-    return {
-      text: ragResult.answer,
-      model: ragResult.model || activeModel,
-      durationMs: ragResult.durationMs,
-      sources: ragResult.sources,
-      isRagGrounded: ragResult.isGrounded,
-      retrievalDurationMs: ragResult.retrievalDurationMs,
-      generationDurationMs: ragResult.generationDurationMs,
-      condensedQuestion: ragResult.condensedQuestion,
-      condensationDurationMs: ragResult.condensationDurationMs,
-      timeToFirstTokenMs: ragResult.timeToFirstTokenMs,
-      isStreamed: ragResult.isStreamed,
-      isCancelled: ragResult.isCancelled,
-    };
+    // If RAG found relevant candidate chunks and generated a grounded response, return it directly
+    if (ragResult.status === 'success' && ragResult.isGrounded) {
+      return {
+        text: ragResult.answer,
+        model: ragResult.model || activeModel,
+        durationMs: ragResult.durationMs,
+        sources: ragResult.sources,
+        isRagGrounded: ragResult.isGrounded,
+        retrievalDurationMs: ragResult.retrievalDurationMs,
+        generationDurationMs: ragResult.generationDurationMs,
+        condensedQuestion: ragResult.condensedQuestion,
+        condensationDurationMs: ragResult.condensationDurationMs,
+        timeToFirstTokenMs: ragResult.timeToFirstTokenMs,
+        isStreamed: ragResult.isStreamed,
+        isCancelled: ragResult.isCancelled,
+      };
+    }
+
+    // When status === 'no_context' (zero indexed documents matched or indexed yet),
+    // log notice and fall through to conversational educational fallback so the student gets an answer!
+    console.info(
+      `[ChatService] No matching study materials found for "${scope.subjectName}". Falling back to educational LLM generation.`
+    );
   }
 
-  // 2. Non-RAG conversational fallback (e.g. general tutor dialogue or when scope has no subject)
+  // 2. Non-RAG conversational fallback (e.g. general tutor dialogue or when RAG finds no course notes)
+  const isNoContextFallback = ragResult?.status === 'no_context';
+  const fallbackNotice =
+    isNoContextFallback && scope?.subjectName
+      ? `> 💡 *Note: No relevant passages were found in your indexed study materials for "${scope.subjectName}". Answering using general AI knowledge:*\n\n`
+      : '';
+
   let systemPrompt = buildEducationalSystemPrompt(scope);
+  if (isNoContextFallback && scope?.subjectName) {
+    systemPrompt += `\n\n### IMPORTANT INSTRUCTION:\nThe student is studying "${scope.subjectName}", but no specific lecture notes were found in their vector database for this question. Provide a comprehensive, accurate, clear, and friendly educational explanation using your general domain knowledge. Break down key concepts step by step with intuitive real-world examples.`;
+  }
   if (conversationSummary && conversationSummary.trim().length > 0) {
     systemPrompt += `\n\n### LONG-TERM CONVERSATION MEMORY (Prior topics and concepts discussed in this study session):\n${conversationSummary.trim()}`;
   }
@@ -238,22 +259,28 @@ export const generateChatResponse = async (
     })),
   ];
 
+  const wrappedOnChunk = onChunk
+    ? (chunk: string, accumulated: string) => {
+        onChunk(chunk, fallbackNotice + accumulated);
+      }
+    : undefined;
+
   try {
     const result = await generateChat({
       model: activeModel,
       messages: ollamaMessages,
       temperature,
       stream: stream ?? Boolean(onChunk),
-      onChunk,
+      onChunk: wrappedOnChunk,
       abortSignal,
       customBaseUrl,
     });
 
     if (result.isCancelled) {
       return {
-        text: result.text.trim(),
+        text: `${fallbackNotice}${result.text.trim()}`,
         model: result.model || activeModel,
-        durationMs: result.durationMs,
+        durationMs: (ragResult?.durationMs || 0) + result.durationMs,
         timeToFirstTokenMs: result.timeToFirstTokenMs,
         isStreamed: Boolean(result.isStreamed),
         isCancelled: true,
@@ -267,12 +294,13 @@ export const generateChatResponse = async (
     }
 
     return {
-      text: result.text.trim(),
+      text: `${fallbackNotice}${result.text.trim()}`,
       model: result.model || activeModel,
-      durationMs: result.durationMs,
+      durationMs: (ragResult?.durationMs || 0) + result.durationMs,
       timeToFirstTokenMs: result.timeToFirstTokenMs,
       isStreamed: result.isStreamed,
       isCancelled: result.isCancelled,
+      isRagGrounded: false,
     };
   } catch (err: unknown) {
     if (abortSignal?.aborted || (err instanceof Error && err.name === 'AbortError')) {

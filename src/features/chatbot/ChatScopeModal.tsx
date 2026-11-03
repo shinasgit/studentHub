@@ -97,7 +97,8 @@ export const ChatScopeModal: React.FC<ChatScopeModalProps> = ({
 
   if (!isOpen) return null;
 
-  const selectedSubject = subjects.find((s) => s.id === selectedSubjectId) || subjects[0];
+  const isGeneralScope = !selectedSubjectId || selectedSubjectId === 'all';
+  const selectedSubject = subjects.find((s) => s.id === selectedSubjectId);
   const selectedModuleCount = Object.values(selectedModuleIds).filter(Boolean).length;
 
   const handleToggleModule = (modId: string) => {
@@ -120,6 +121,23 @@ export const ChatScopeModal: React.FC<ChatScopeModalProps> = ({
   };
 
   const handleSave = () => {
+    if (isGeneralScope) {
+      const newScope: ChatStudyScope = {
+        subjectId: '',
+        subjectName: 'General Learning',
+        subjectCode: 'ALL',
+        subjectColor: '#10b981',
+        scopeMode: 'entire_subject',
+        moduleIds: [],
+        moduleNames: [],
+        totalModuleCount: 0,
+        resourceCount: 0,
+      };
+      onApply(newScope);
+      onClose();
+      return;
+    }
+
     if (!selectedSubject) return;
 
     const activeModuleIds =
@@ -159,7 +177,9 @@ export const ChatScopeModal: React.FC<ChatScopeModalProps> = ({
   };
 
   const canSave =
-    scopeMode === 'entire_subject' || (scopeMode === 'specific_modules' && selectedModuleCount > 0);
+    isGeneralScope ||
+    scopeMode === 'entire_subject' ||
+    (scopeMode === 'specific_modules' && selectedModuleCount > 0);
 
   return (
     <div
@@ -277,6 +297,54 @@ export const ChatScopeModal: React.FC<ChatScopeModalProps> = ({
                 gap: '8px',
               }}
             >
+              {/* General Learning Option */}
+              <button
+                type="button"
+                onClick={() => setSelectedSubjectId('')}
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 'var(--radius-md)',
+                  background: isGeneralScope ? 'var(--accent-primary-subtle)' : 'var(--bg-tertiary)',
+                  border: isGeneralScope
+                    ? '1.5px solid var(--accent-primary)'
+                    : '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'all var(--transition-fast)',
+                }}
+              >
+                <div
+                  style={{
+                    width: '10px',
+                    height: '10px',
+                    borderRadius: '50%',
+                    background: '#10b981',
+                    flexShrink: 0,
+                  }}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: '0.86rem',
+                      fontWeight: 600,
+                      color: isGeneralScope ? 'var(--accent-primary)' : 'var(--text-primary)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    🌐 General Learning
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                    All topics • Open AI tutor
+                  </div>
+                </div>
+                {isGeneralScope && <Check size={14} color="var(--accent-primary)" style={{ flexShrink: 0 }} />}
+              </button>
+
               {subjects.map((sub) => {
                 const isSelected = sub.id === selectedSubjectId;
                 const subColor = sub.color || '#4f64f1';
@@ -337,8 +405,41 @@ export const ChatScopeModal: React.FC<ChatScopeModalProps> = ({
           </div>
 
           {/* 2. Scope Mode Selection */}
-          <div>
-            <label
+          {isGeneralScope ? (
+            <div
+              style={{
+                padding: '14px 16px',
+                borderRadius: 'var(--radius-md)',
+                background: 'var(--bg-tertiary)',
+                border: '1px solid var(--border-subtle)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+              }}
+            >
+              <div
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: 'var(--radius-sm)',
+                  background: 'rgba(16, 185, 129, 0.15)',
+                  color: '#10b981',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  fontSize: '1rem',
+                }}
+              >
+                🌐
+              </div>
+              <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                <strong style={{ color: 'var(--text-primary)' }}>General Learning Active:</strong> You can ask questions about any subject, programming language, or general academic concept. Answers will be provided directly using Llama 3.2 3B without course note restrictions.
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label
               style={{
                 display: 'block',
                 fontSize: '0.78rem',
@@ -450,9 +551,10 @@ export const ChatScopeModal: React.FC<ChatScopeModalProps> = ({
               </button>
             </div>
           </div>
+          )}
 
           {/* 3. Specific Modules Checklist (if in specific_modules mode) */}
-          {scopeMode === 'specific_modules' && (
+          {!isGeneralScope && scopeMode === 'specific_modules' && (
             <div>
               <div
                 style={{

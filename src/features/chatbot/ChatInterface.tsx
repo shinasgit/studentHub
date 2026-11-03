@@ -987,7 +987,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
               whiteSpace: 'nowrap',
             }}
           >
-            {isEntire ? 'Entire Subject' : `${scope.moduleNames.length} module(s)`}
+            {!scope.subjectId ? 'Open Knowledge' : isEntire ? 'Entire Subject' : `${scope.moduleNames.length} module(s)`}
           </span>
 
           {/* Change Scope Button */}

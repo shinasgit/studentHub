@@ -5,20 +5,32 @@
 import { auth } from '../lib/firebase';
 
 /**
- * Returns the base URL for the backend API.
+ * Deployed Render backend production URL.
+ */
+export const DEFAULT_RENDER_BACKEND_URL = 'https://ai-studenthub-backend.onrender.com';
+
+/**
+ * Returns the base URL for the cloud backend API.
+ * - Checks VITE_API_BASE_URL, VITE_BACKEND_API_URL, and VITE_RENDER_API_URL.
  * - In local development: defaults to '' (empty string), using Vite dev server middleware or proxy.
- * - In production: uses VITE_BACKEND_API_URL or VITE_RENDER_API_URL if configured.
+ * - In production: uses configured env URL, or falls back to DEFAULT_RENDER_BACKEND_URL.
  */
 export function getBackendApiUrl(): string {
   const envUrl =
+    (import.meta.env.VITE_API_BASE_URL as string | undefined) ||
     (import.meta.env.VITE_BACKEND_API_URL as string | undefined) ||
     (import.meta.env.VITE_RENDER_API_URL as string | undefined);
 
-  if (envUrl && typeof envUrl === 'string') {
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
     return envUrl.trim().replace(/\/+$/, '');
   }
 
-  // In local development or fallback, relative path routes through Vite dev server
+  // In production builds, default to deployed Render backend
+  if (import.meta.env.PROD) {
+    return DEFAULT_RENDER_BACKEND_URL;
+  }
+
+  // In local development, empty string routes to Vite dev server middleware
   return '';
 }
 
@@ -32,7 +44,7 @@ export function isRemoteBackendConfigured(): boolean {
 /**
  * Constructs a fully qualified cloud endpoint URL.
  * Example: getCloudApiEndpoint('/api/extract-web')
- * -> 'https://your-service.onrender.com/api/extract-web' (in production)
+ * -> 'https://ai-studenthub-backend.onrender.com/api/extract-web' (when pointing to Render)
  * -> '/api/extract-web' (in local dev with Vite)
  */
 export function getCloudApiEndpoint(endpointPath: string): string {
@@ -43,6 +55,7 @@ export function getCloudApiEndpoint(endpointPath: string): string {
 
 /**
  * Asynchronously retrieves a valid Firebase Authentication Bearer header
+
  * for authenticated backend requests.
  */
 export async function getAuthBearerHeader(): Promise<Record<string, string>> {
@@ -89,3 +102,30 @@ export async function checkBackendHealth(): Promise<{
     };
   }
 }
+
+/**
+ * Executes a fetch request to the cloud backend with Firebase Auth Bearer token and JSON headers attached.
+ */
+export async function fetchWithAuth(
+  endpointPath: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  const url = getCloudApiEndpoint(endpointPath);
+  const authHeaders = await getAuthBearerHeader();
+
+  const headers = new Headers(options.headers || {});
+  if (!headers.has('Content-Type') && options.body && typeof options.body === 'string') {
+    headers.set('Content-Type', 'application/json');
+  }
+  for (const [key, value] of Object.entries(authHeaders)) {
+    if (!headers.has(key)) {
+      headers.set(key, value);
+    }
+  }
+
+  return fetch(url, {
+    ...options,
+    headers,
+  });
+}
+
